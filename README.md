@@ -2,6 +2,8 @@
 
 MCP server for TradingView Desktop — 78 tools to read, control, and automate charts via Chrome DevTools Protocol.
 
+**[Leer en espanol](README.es.md)**
+
 Built on top of [tradingview-mcp](https://github.com/tradesdontlie/tradingview-mcp) by [@tradesdontlie](https://github.com/tradesdontlie) and the [Jackson fork](https://github.com/LewisWJackson/tradingview-mcp-jackson) by [@LewisWJackson](https://github.com/LewisWJackson). This fork adds security hardening, input sanitization, bug fixes, and code quality improvements.
 
 > [!WARNING]

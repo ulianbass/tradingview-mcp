@@ -120,9 +120,12 @@ export function saveSession({ brief, date } = {}) {
   const dateStr = date || new Date().toISOString().split("T")[0];
   const filePath = join(SESSIONS_DIR, `${dateStr}.json`);
 
-  const existing = existsSync(filePath)
-    ? JSON.parse(readFileSync(filePath, "utf8"))
-    : {};
+  let existing = {};
+  if (existsSync(filePath)) {
+    try {
+      existing = JSON.parse(readFileSync(filePath, "utf8"));
+    } catch (_) {}
+  }
   const record = {
     ...existing,
     date: dateStr,
@@ -139,7 +142,11 @@ export function getSession({ date } = {}) {
   const filePath = join(SESSIONS_DIR, `${dateStr}.json`);
 
   if (existsSync(filePath)) {
-    return { success: true, ...JSON.parse(readFileSync(filePath, "utf8")) };
+    try {
+      return { success: true, ...JSON.parse(readFileSync(filePath, "utf8")) };
+    } catch (e) {
+      return { success: false, error: `Corrupt session file ${filePath}: ${e.message}` };
+    }
   }
 
   // Fall back to yesterday
@@ -149,11 +156,15 @@ export function getSession({ date } = {}) {
   const yesterdayPath = join(SESSIONS_DIR, `${yesterdayStr}.json`);
 
   if (existsSync(yesterdayPath)) {
-    return {
-      success: true,
-      note: "No session for today — returning yesterday",
-      ...JSON.parse(readFileSync(yesterdayPath, "utf8")),
-    };
+    try {
+      return {
+        success: true,
+        note: "No session for today — returning yesterday",
+        ...JSON.parse(readFileSync(yesterdayPath, "utf8")),
+      };
+    } catch (e) {
+      return { success: false, error: `Corrupt session file ${yesterdayPath}: ${e.message}` };
+    }
   }
 
   return {

@@ -1,10 +1,10 @@
 # TradingView MCP
 
-MCP server for TradingView Desktop — 78 tools to read, control, and automate charts via Chrome DevTools Protocol.
+MCP server for TradingView Desktop — 78 tools to read, control, and automate charts via Chrome DevTools Protocol. Works with **Claude Code**, **Codex**, and **Claude Desktop**.
 
 **[Leer en espanol](README.es.md)**
 
-Built on top of [tradingview-mcp](https://github.com/tradesdontlie/tradingview-mcp) by [@tradesdontlie](https://github.com/tradesdontlie) and the [Jackson fork](https://github.com/LewisWJackson/tradingview-mcp-jackson) by [@LewisWJackson](https://github.com/LewisWJackson). This fork adds security hardening, input sanitization, bug fixes, and code quality improvements.
+Built on top of [tradingview-mcp](https://github.com/tradesdontlie/tradingview-mcp) by [@tradesdontlie](https://github.com/tradesdontlie) and the [Jackson fork](https://github.com/LewisWJackson/tradingview-mcp-jackson) by [@LewisWJackson](https://github.com/LewisWJackson). This fork adds security hardening, input sanitization, bug fixes, Codex compatibility, and code quality improvements.
 
 > [!WARNING]
 > **Not affiliated with TradingView Inc. or Anthropic.** This tool connects to your locally running TradingView Desktop app via Chrome DevTools Protocol. Review the [Disclaimer](#disclaimer) before use.
@@ -26,6 +26,7 @@ Built on top of [tradingview-mcp](https://github.com/tradesdontlie/tradingview-m
 | `morning_brief` | One command that scans your watchlist, reads all your indicators, and returns structured data for Claude to generate your session bias |
 | `session_save` / `session_get` | Saves your daily brief to `~/.tradingview-mcp/sessions/` so you can compare today vs yesterday |
 | `rules.json` | Write your trading rules once — bias criteria, risk rules, watchlist. The morning brief applies them automatically every day |
+| **Codex support** | Full compatibility with Codex Desktop — auto-configured via `config.toml` with MCP server registration |
 | Launch bug fix | Fixed `tv_launch` compatibility with TradingView Desktop v2.14+ |
 | `tv brief` CLI | Run your morning brief from the terminal in one word |
 

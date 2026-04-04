@@ -1,8 +1,8 @@
-# TradingView MCP Jackson
+# TradingView MCP
 
-If you found this from the YouTube video — welcome. This is the improved fork. Everything you need is below.
+MCP server for TradingView Desktop — 78 tools to read, control, and automate charts via Chrome DevTools Protocol.
 
-Built on top of the original [tradingview-mcp](https://github.com/tradesdontlie/tradingview-mcp) by [@tradesdontlie](https://github.com/tradesdontlie). Full credit to them for the foundation. This fork adds a morning brief workflow, a rules config, and fixes the launch bug on TradingView Desktop v2.14+.
+Built on top of [tradingview-mcp](https://github.com/tradesdontlie/tradingview-mcp) by [@tradesdontlie](https://github.com/tradesdontlie) and the [Jackson fork](https://github.com/LewisWJackson/tradingview-mcp-jackson) by [@LewisWJackson](https://github.com/LewisWJackson). This fork adds security hardening, input sanitization, bug fixes, and code quality improvements.
 
 > [!WARNING]
 > **Not affiliated with TradingView Inc. or Anthropic.** This tool connects to your locally running TradingView Desktop app via Chrome DevTools Protocol. Review the [Disclaimer](#disclaimer) before use.
@@ -19,6 +19,8 @@ Built on top of the original [tradingview-mcp](https://github.com/tradesdontlie/
 
 | Feature | What it does |
 |---------|-------------|
+| **Security hardening** | Input sanitization via `escapeJsString()` / `validateNumber()` — fixes JS injection vulnerabilities in 8 core modules |
+| **Bug fixes** | Protected JSON.parse calls, missing await fixes, negative index validation, graceful shutdown |
 | `morning_brief` | One command that scans your watchlist, reads all your indicators, and returns structured data for Claude to generate your session bias |
 | `session_save` / `session_get` | Saves your daily brief to `~/.tradingview-mcp/sessions/` so you can compare today vs yesterday |
 | `rules.json` | Write your trading rules once — bias criteria, risk rules, watchlist. The morning brief applies them automatically every day |
@@ -32,9 +34,9 @@ Built on top of the original [tradingview-mcp](https://github.com/tradesdontlie/
 Paste this into Claude Code and it will handle everything:
 
 ```
-Set up TradingView MCP Jackson for me. 
-Clone https://github.com/LewisWJackson/tradingview-mcp-jackson.git to ~/tradingview-mcp-jackson, run npm install, then add it to my MCP config at ~/.claude/.mcp.json (merge with any existing servers, don't overwrite them). 
-The config block is: { "mcpServers": { "tradingview": { "command": "node", "args": ["/Users/YOUR_USERNAME/tradingview-mcp-jackson/src/server.js"] } } } — replace YOUR_USERNAME with my actual username.
+Set up TradingView MCP for me.
+Clone https://github.com/ulianbass/tradingview-mcp.git to ~/tradingview-mcp, run npm install, then add it to my MCP config at ~/.claude/mcp.json (merge with any existing servers, don't overwrite them).
+The config block is: { "mcpServers": { "TradingView MCP": { "command": "node", "args": ["/Users/YOUR_USERNAME/tradingview-mcp/src/server.js"] } } } — replace YOUR_USERNAME with my actual username.
 Then copy rules.example.json to rules.json and open it so I can fill in my trading rules.
 Finally restart and verify with tv_health_check.
 ```
@@ -57,8 +59,8 @@ Or follow the manual steps below.
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/LewisWJackson/tradingview-mcp-jackson.git ~/tradingview-mcp-jackson
-cd ~/tradingview-mcp-jackson
+git clone https://github.com/ulianbass/tradingview-mcp.git ~/tradingview-mcp
+cd ~/tradingview-mcp
 npm install
 ```
 
@@ -101,9 +103,9 @@ Add to `~/.claude/.mcp.json` (merge with any existing servers):
 ```json
 {
   "mcpServers": {
-    "tradingview": {
+    "TradingView MCP": {
       "command": "node",
-      "args": ["/Users/YOUR_USERNAME/tradingview-mcp-jackson/src/server.js"]
+      "args": ["/Users/YOUR_USERNAME/tradingview-mcp/src/server.js"]
     }
   }
 }
@@ -317,7 +319,9 @@ Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  Tradin
 
 ## Credits
 
-This fork is built on [tradingview-mcp](https://github.com/tradesdontlie/tradingview-mcp) by [@tradesdontlie](https://github.com/tradesdontlie). The original tool is the foundation — go star their repo.
+- Original [tradingview-mcp](https://github.com/tradesdontlie/tradingview-mcp) by [@tradesdontlie](https://github.com/tradesdontlie) — the foundation
+- [Jackson fork](https://github.com/LewisWJackson/tradingview-mcp-jackson) by [@LewisWJackson](https://github.com/LewisWJackson) — morning brief, rules config, launch fix
+- Security hardening and bug fixes by [@ulianbass](https://github.com/ulianbass)
 
 ---
 

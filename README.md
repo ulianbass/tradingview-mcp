@@ -96,9 +96,13 @@ scripts\launch_tv_debug.bat
 
 Or use the MCP tool after setup: `"Use tv_launch to start TradingView in debug mode"`
 
-### 4. Add to Claude Code
+### 4. Add to your AI tools
 
-Add to `~/.claude/.mcp.json` (merge with any existing servers):
+Works with **Claude Code**, **Claude Desktop**, and **Codex**. Add to whichever you use:
+
+#### Claude Code
+
+Add to `~/.claude/mcp.json`:
 
 ```json
 {
@@ -111,11 +115,70 @@ Add to `~/.claude/.mcp.json` (merge with any existing servers):
 }
 ```
 
+#### Claude Desktop
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (Mac) inside the `mcpServers` object:
+
+```json
+"TradingView MCP": {
+  "command": "node",
+  "args": ["/Users/YOUR_USERNAME/tradingview-mcp/src/server.js"]
+}
+```
+
+#### Codex
+
+Add to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.tradingview]
+command = "node"
+args = ["/Users/YOUR_USERNAME/tradingview-mcp/src/server.js"]
+
+[mcp_servers.tradingview.tools.tv_health_check]
+approval_mode = "approve"
+
+[mcp_servers.tradingview.tools.chart_get_state]
+approval_mode = "approve"
+
+[mcp_servers.tradingview.tools.quote_get]
+approval_mode = "approve"
+
+[mcp_servers.tradingview.tools.data_get_ohlcv]
+approval_mode = "approve"
+
+[mcp_servers.tradingview.tools.data_get_study_values]
+approval_mode = "approve"
+
+[mcp_servers.tradingview.tools.data_get_pine_lines]
+approval_mode = "approve"
+
+[mcp_servers.tradingview.tools.data_get_pine_labels]
+approval_mode = "approve"
+
+[mcp_servers.tradingview.tools.data_get_pine_tables]
+approval_mode = "approve"
+
+[mcp_servers.tradingview.tools.chart_set_symbol]
+approval_mode = "approve"
+
+[mcp_servers.tradingview.tools.chart_set_timeframe]
+approval_mode = "approve"
+
+[mcp_servers.tradingview.tools.capture_screenshot]
+approval_mode = "approve"
+
+[mcp_servers.tradingview.tools.morning_brief]
+approval_mode = "approve"
+```
+
+> **Note for Codex**: Each tool must have `approval_mode` declared or Codex won't load it. The list above covers the most common tools. Add more as needed.
+
 Replace `YOUR_USERNAME` with your actual username. On Mac: `echo $USER` to check.
 
 ### 5. Verify
 
-Restart Claude Code, then ask: *"Use tv_health_check to verify TradingView is connected"*
+Restart your AI tool, then ask: *"Use tv_health_check to verify TradingView is connected"*
 
 ### 6. Run your first morning brief
 
@@ -306,12 +369,14 @@ Full command list: `tv --help`
 ## Architecture
 
 ```
-Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
+Claude Code / Claude Desktop / Codex  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
 ```
 
 - **78 original tools** + **3 morning brief tools** = 81 MCP tools total
 - **Transport**: MCP over stdio + CLI (`tv` command)
 - **Connection**: Chrome DevTools Protocol on localhost:9222
+- **Compatible with**: Claude Code, Claude Desktop, Codex (any MCP-capable AI tool)
+- **Security**: All user inputs sanitized via `escapeJsString()` / `validateNumber()` before CDP evaluation
 - **No external network calls** — everything runs locally
 - **Zero extra dependencies** beyond the original
 

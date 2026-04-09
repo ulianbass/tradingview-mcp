@@ -71,4 +71,31 @@ export function registerChartTools(server) {
     try { return jsonResult(await core.symbolSearch({ query, type })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
+
+  server.tool('chart_pan', 'Pan the chart by N bars. Positive bars = right (newer), negative = left (older). Use for "show me the left/right side of the chart".', {
+    bars: z.coerce.number().describe('Number of bars to pan (positive=right/newer, negative=left/older)'),
+  }, async ({ bars }) => {
+    try { return jsonResult(await core.pan({ bars })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('chart_zoom', 'Zoom in/out by a factor. factor > 1 = zoom in (fewer bars visible), factor < 1 = zoom out (more bars). Use "0.5" for zoom out 2x, "2" for zoom in 2x.', {
+    factor: z.coerce.number().describe('Zoom factor (e.g., 2 = zoom in 2x, 0.5 = zoom out 2x)'),
+  }, async ({ factor }) => {
+    try { return jsonResult(await core.zoom({ factor })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('chart_scroll_to_realtime', 'Scroll the chart to the latest (rightmost) bar.', {}, async () => {
+    try { return jsonResult(await core.scrollToRealtime()); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('chart_compare_symbol', 'Add a compare symbol overlay on the current chart (TradingView native Compare feature). The secondary symbol shares the same axis.', {
+    symbol: z.string().describe('Symbol to compare (e.g., "BINANCE:ETHUSDT", "NASDAQ:QQQ")'),
+    source: z.string().optional().describe('Price source: open, high, low, close, hl2, hlc3, ohlc4. Default: close'),
+  }, async ({ symbol, source }) => {
+    try { return jsonResult(await core.compareSymbol({ symbol, source })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
 }

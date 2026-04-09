@@ -2,8 +2,9 @@
  * Core chart control logic.
  */
 import { evaluate, evaluateAsync } from '../connection.js';
-import { waitForChartReady } from '../wait.js';
+import { waitForChart, waitForStudyDelta, sleep } from '../await.js';
 import { escapeJsString, validateNumber } from '../sanitize.js';
+import { ErrorCodes } from '../errors.js';
 
 const CHART_API = 'window.TradingViewApi._activeChartWidgetWV.value()';
 
@@ -31,29 +32,28 @@ export async function getState() {
 
 export async function setSymbol({ symbol }) {
   const escaped = escapeJsString(symbol);
-  await evaluateAsync(`
-    (function() {
-      var chart = ${CHART_API};
-      return new Promise(function(resolve) {
-        chart.setSymbol('${escaped}', {});
-        setTimeout(resolve, 500);
-      });
-    })()
-  `);
-  const ready = await waitForChartReady(symbol);
-  return { success: true, symbol, chart_ready: ready };
+  await evaluate(`${CHART_API}.setSymbol('${escaped}', {})`);
+  const ready = await waitForChart({ expectedSymbol: symbol });
+  return {
+    success: ready.ok,
+    symbol,
+    chart_ready: ready.ok,
+    elapsed_ms: ready.elapsed_ms,
+    code: ready.ok ? undefined : ready.code,
+  };
 }
 
 export async function setTimeframe({ timeframe }) {
   const escaped = escapeJsString(timeframe);
-  await evaluate(`
-    (function() {
-      var chart = ${CHART_API};
-      chart.setResolution('${escaped}', {});
-    })()
-  `);
-  const ready = await waitForChartReady(null, timeframe);
-  return { success: true, timeframe, chart_ready: ready };
+  await evaluate(`${CHART_API}.setResolution('${escaped}', {})`);
+  const ready = await waitForChart({ expectedResolution: timeframe });
+  return {
+    success: ready.ok,
+    timeframe,
+    chart_ready: ready.ok,
+    elapsed_ms: ready.elapsed_ms,
+    code: ready.ok ? undefined : ready.code,
+  };
 }
 
 export async function setType({ chart_type }) {
@@ -86,6 +86,7 @@ export async function manageIndicator({ action, indicator, entity_id, inputs: in
   if (action === 'add') {
     const inputArr = inputs ? Object.entries(inputs).map(([k, v]) => ({ id: k, value: v })) : [];
     const before = await evaluate(`${CHART_API}.getAllStudies().map(function(s) { return s.id; })`);
+    const beforeCount = (before || []).length;
     const escapedIndicator = escapeJsString(indicator);
     await evaluate(`
       (function() {
@@ -93,12 +94,26 @@ export async function manageIndicator({ action, indicator, entity_id, inputs: in
         chart.createStudy('${escapedIndicator}', false, false, ${JSON.stringify(inputArr)});
       })()
     `);
-    await new Promise(r => setTimeout(r, 1500));
+    // Wait for the study count to increase instead of a blind 1500ms sleep
+    const waited = await waitForStudyDelta(beforeCount, 1, { timeout: 8000 });
     const after = await evaluate(`${CHART_API}.getAllStudies().map(function(s) { return s.id; })`);
     const newIds = (after || []).filter(id => !(before || []).includes(id));
-    return { success: newIds.length > 0, action: 'add', indicator, entity_id: newIds[0] || null, new_study_count: newIds.length };
+    return {
+      success: newIds.length > 0,
+      action: 'add',
+      indicator,
+      entity_id: newIds[0] || null,
+      new_study_count: newIds.length,
+      elapsed_ms: waited.elapsed_ms,
+      timed_out: !waited.ok,
+    };
   } else if (action === 'remove') {
-    if (!entity_id) throw new Error('entity_id required for remove action. Use chart_get_state to find study IDs.');
+    if (!entity_id) {
+      const err = new Error('entity_id required for remove action. Use chart_get_state to find study IDs.');
+      err.code = ErrorCodes.INVALID_INPUT;
+      throw err;
+    }
+    const beforeCount = await evaluate(`${CHART_API}.getAllStudies().length`);
     const escapedEntityId = escapeJsString(entity_id);
     await evaluate(`
       (function() {
@@ -106,9 +121,12 @@ export async function manageIndicator({ action, indicator, entity_id, inputs: in
         chart.removeEntity('${escapedEntityId}');
       })()
     `);
-    return { success: true, action: 'remove', entity_id };
+    const waited = await waitForStudyDelta(beforeCount, -1, { timeout: 5000 });
+    return { success: waited.ok, action: 'remove', entity_id, elapsed_ms: waited.elapsed_ms };
   } else {
-    throw new Error('action must be "add" or "remove"');
+    const err = new Error('action must be "add" or "remove"');
+    err.code = ErrorCodes.INVALID_INPUT;
+    throw err;
   }
 }
 
@@ -142,7 +160,7 @@ export async function setVisibleRange({ from, to }) {
       ts.zoomToBarsRange(fromIdx, toIdx);
     })()
   `);
-  await new Promise(r => setTimeout(r, 500));
+  await sleep(300);
   const actual = await evaluate(`
     (function() {
       var chart = ${CHART_API};
@@ -188,8 +206,96 @@ export async function scrollToDate({ date }) {
       ts.zoomToBarsRange(fromIdx, toIdx);
     })()
   `);
-  await new Promise(r => setTimeout(r, 500));
+  await sleep(300);
   return { success: true, date, centered_on: timestamp, resolution, window: { from: scrollFrom, to: scrollTo } };
+}
+
+/**
+ * Pan the chart by a number of bars. Positive = right (newer), negative = left (older).
+ */
+export async function pan({ bars }) {
+  const n = validateNumber(bars, 'bars');
+  await evaluate(`
+    (function() {
+      var chart = ${CHART_API};
+      var ts = chart._chartWidget.model().timeScale();
+      try { ts.scrollToOffsetAnimated(-${n}); return true; }
+      catch(e) { return { error: e.message }; }
+    })()
+  `);
+  await sleep(200);
+  return { success: true, bars_panned: n };
+}
+
+/**
+ * Zoom in/out by a factor. factor > 1 = zoom in (fewer bars), factor < 1 = zoom out.
+ */
+export async function zoom({ factor }) {
+  const f = validateNumber(factor, 'factor');
+  if (f <= 0) {
+    const err = new Error('factor must be positive');
+    err.code = ErrorCodes.INVALID_INPUT;
+    throw err;
+  }
+  const result = await evaluate(`
+    (function() {
+      try {
+        var chart = ${CHART_API};
+        var ts = chart._chartWidget.model().timeScale();
+        ts.zoom(${f});
+        return { ok: true };
+      } catch(e) { return { ok: false, error: e.message }; }
+    })()
+  `);
+  await sleep(200);
+  if (!result?.ok) {
+    const err = new Error(`Zoom failed: ${result?.error || 'unknown'}`);
+    err.code = ErrorCodes.API_NOT_AVAILABLE;
+    throw err;
+  }
+  return { success: true, factor: f };
+}
+
+/**
+ * Add a compare symbol overlay on the current chart.
+ * TradingView's native "Compare" feature — draws another ticker on the
+ * same pane, same axis.
+ */
+export async function compareSymbol({ symbol, source = 'close' }) {
+  const escapedSymbol = escapeJsString(symbol);
+  const escapedSource = escapeJsString(source);
+  const before = await evaluate(`${CHART_API}.getAllStudies().length`);
+  const result = await evaluate(`
+    (function() {
+      try {
+        var api = ${CHART_API};
+        var study = api.addOverlayStudy('Compare', [['symbol', '${escapedSymbol}'], ['source', '${escapedSource}']]);
+        return { ok: true };
+      } catch(e) { return { ok: false, error: e.message }; }
+    })()
+  `);
+  if (!result?.ok) {
+    const err = new Error(`Compare overlay failed: ${result?.error || 'unknown'}`);
+    err.code = ErrorCodes.API_NOT_AVAILABLE;
+    throw err;
+  }
+  const waited = await waitForStudyDelta(before, 1, { timeout: 5000 });
+  return {
+    success: waited.ok,
+    symbol,
+    source,
+    elapsed_ms: waited.elapsed_ms,
+    note: 'Overlay added to current pane. Use chart_get_state to find its entity_id, then chart_manage_indicator to remove.',
+  };
+}
+
+/**
+ * Scroll to the latest bar (realtime).
+ */
+export async function scrollToRealtime() {
+  await evaluate(`${CHART_API}._chartWidget.model().timeScale().scrollToRealtime()`);
+  await sleep(150);
+  return { success: true };
 }
 
 export async function symbolInfo() {

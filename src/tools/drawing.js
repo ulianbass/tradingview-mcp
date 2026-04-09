@@ -37,4 +37,14 @@ export function registerDrawingTools(server) {
     try { return jsonResult(await core.getProperties({ entity_id })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
+
+  server.tool('draw_multipoint', 'Draw multi-point shapes: Fibonacci retracement/extension/channel, parallel channels, pitchforks, triangles, Gann tools. Accepts any number of points (TradingView uses what it needs).', {
+    shape: z.string().describe('Shape name: fib_retracement, fib_extension, fib_channel, parallel_channel, pitchfork, schiff_pitchfork, triangle, gann_fan, gann_box, trend_line, rectangle, horizontal_line, vertical_line'),
+    points: z.array(z.object({ time: z.coerce.number(), price: z.coerce.number() })).describe('Array of {time: unix_seconds, price: number} points — pass 2 for trend/fib, 3 for pitchfork/channel/triangle'),
+    overrides: z.string().optional().describe('JSON string of style overrides'),
+    text: z.string().optional().describe('Text label for the shape'),
+  }, async ({ shape, points, overrides, text }) => {
+    try { return jsonResult(await core.drawMultipoint({ shape, points, overrides, text })); }
+    catch (err) { return jsonResult({ success: false, error: err.message, code: err.code }, true); }
+  });
 }

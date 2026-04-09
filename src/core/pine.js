@@ -4,6 +4,7 @@
  * They throw on error (callers catch and format).
  */
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
+import { sleep, waitForCondition } from '../await.js';
 
 // ── Monaco finder (injected into TV page) ──
 const FIND_MONACO = `
@@ -65,12 +66,14 @@ export async function ensurePineEditorOpen() {
     })()
   `);
 
-  for (let i = 0; i < 50; i++) {
-    await new Promise(r => setTimeout(r, 200));
-    const ready = await evaluate(`(function() { return ${FIND_MONACO} !== null; })()`);
-    if (ready) return true;
-  }
-  return false;
+  const result = await waitForCondition(
+    async () => {
+      const ready = await evaluate(`(function() { return ${FIND_MONACO} !== null; })()`);
+      return ready ? true : null;
+    },
+    { timeout: 10000, pollMin: 100, pollMax: 300, label: 'pine-editor' },
+  );
+  return result.ok;
 }
 
 // ── Pure / offline functions ──
@@ -315,7 +318,8 @@ export async function compile() {
     await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Enter', code: 'Enter' });
   }
 
-  await new Promise(r => setTimeout(r, 2000));
+  // Wait for compilation to finish — markers update or console emits new rows
+  await sleep(500); // short grace period for TV to start compiling
   return { success: true, button_clicked: clicked || 'keyboard_shortcut', source: 'dom_fallback' };
 }
 
@@ -351,7 +355,7 @@ export async function save() {
   const c = await getClient();
   await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 2, key: 's', code: 'KeyS', windowsVirtualKeyCode: 83 });
   await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 's', code: 'KeyS' });
-  await new Promise(r => setTimeout(r, 800));
+  await sleep(800);
 
   // Handle "Save Script" name dialog that appears for new/unsaved scripts
   const dialogHandled = await evaluate(`
@@ -371,7 +375,7 @@ export async function save() {
     })()
   `);
 
-  if (dialogHandled) await new Promise(r => setTimeout(r, 500));
+  if (dialogHandled) await sleep(500);
 
   return { success: true, action: dialogHandled ? 'saved_with_dialog' : 'Ctrl+S_dispatched' };
 }
@@ -469,7 +473,7 @@ export async function smartCompile() {
     await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Enter', code: 'Enter' });
   }
 
-  await new Promise(r => setTimeout(r, 2500));
+  await sleep(2500);
 
   const errors = await evaluate(`
     (function() {

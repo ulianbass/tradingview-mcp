@@ -138,7 +138,7 @@ async function fetchValues() {
             }
           }
           if (Object.keys(vals).length > 0) results.push({ name: studies[i].name, values: vals });
-        } catch(e) {}
+        } catch(e) { results.push({ name: studies[i].name, error: e.message }); }
       }
       return { symbol: chart.symbol(), study_count: results.length, studies: results };
     })()
@@ -184,7 +184,7 @@ async function fetchLines(studyFilter) {
           });
           levels.sort(function(a, b) { return b - a; });
           if (levels.length > 0) results.push({ study: s.name, levels: levels });
-        } catch(e) {}
+        } catch(e) { results.push({ study: s.name, error: e.message }); }
       }
       return { symbol: chart.symbol(), study_count: results.length, studies: results };
     })()
@@ -227,7 +227,7 @@ async function fetchLabels(studyFilter) {
             if (text) labels.push({ text: text, price: price });
           });
           if (labels.length > 0) results.push({ study: s.name, labels: labels.slice(0, 50) });
-        } catch(e) {}
+        } catch(e) { results.push({ study: s.name, error: e.message }); }
       }
       return { symbol: chart.symbol(), study_count: results.length, studies: results };
     })()
@@ -277,7 +277,7 @@ async function fetchTables(studyFilter) {
             });
           }
           if (tables.length > 0) results.push({ study: s.name, tables: tables });
-        } catch(e) {}
+        } catch(e) { results.push({ study: s.name, error: e.message }); }
       }
       return { symbol: chart.symbol(), study_count: results.length, studies: results };
     })()

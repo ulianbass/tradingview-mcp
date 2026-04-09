@@ -3,6 +3,60 @@
  */
 import { evaluate, getChartApi } from '../connection.js';
 import { escapeJsString, validateNumber } from '../sanitize.js';
+import { sleep } from '../await.js';
+import { ErrorCodes } from '../errors.js';
+
+const VALID_SHAPES_2PT = [
+  'trend_line', 'rectangle', 'horizontal_line', 'vertical_line', 'text',
+  'fib_retracement', 'fib_extension', 'fib_channel',
+  'gann_fan', 'gann_box',
+];
+const VALID_SHAPES_3PT = ['triangle', 'parallel_channel', 'pitchfork', 'schiff_pitchfork'];
+
+/**
+ * Draw a multi-point shape (Fibonacci, channel, pitchfork, triangle, etc).
+ * Accepts an array of points — TradingView determines how many it needs.
+ */
+export async function drawMultipoint({ shape, points, overrides: overridesRaw, text }) {
+  let overrides = {};
+  if (overridesRaw) {
+    if (typeof overridesRaw === 'string') {
+      try { overrides = JSON.parse(overridesRaw); } catch (e) {
+        const err = new Error(`Invalid JSON for overrides: ${e.message}`);
+        err.code = ErrorCodes.PARSE_ERROR;
+        throw err;
+      }
+    } else { overrides = overridesRaw; }
+  }
+  if (!Array.isArray(points) || points.length < 2) {
+    const err = new Error('points must be an array of at least 2 {time, price} objects');
+    err.code = ErrorCodes.INVALID_INPUT;
+    throw err;
+  }
+
+  const apiPath = await getChartApi();
+  const validated = points.map((p, i) => ({
+    time: validateNumber(p.time, `points[${i}].time`),
+    price: validateNumber(p.price, `points[${i}].price`),
+  }));
+  const pointsJson = JSON.stringify(validated);
+  const overridesStr = JSON.stringify(overrides || {});
+  const textStr = text ? JSON.stringify(text) : '""';
+  const escapedShape = escapeJsString(shape);
+
+  const before = await evaluate(`${apiPath}.getAllShapes().map(function(s) { return s.id; })`);
+  await evaluate(`
+    ${apiPath}.createMultipointShape(
+      ${pointsJson},
+      { shape: '${escapedShape}', overrides: ${overridesStr}, text: ${textStr} }
+    )
+  `);
+  await sleep(200);
+  const after = await evaluate(`${apiPath}.getAllShapes().map(function(s) { return s.id; })`);
+  const newId = (after || []).find((id) => !(before || []).includes(id)) || null;
+
+  return { success: !!newId, shape, entity_id: newId, point_count: validated.length };
+}
 
 export async function drawShape({ shape, point, point2, overrides: overridesRaw, text }) {
   let overrides = {};
@@ -38,7 +92,7 @@ export async function drawShape({ shape, point, point2, overrides: overridesRaw,
     `);
   }
 
-  await new Promise(r => setTimeout(r, 200));
+  await sleep(200);
   const after = await evaluate(`${apiPath}.getAllShapes().map(function(s) { return s.id; })`);
   const newId = (after || []).find(id => !(before || []).includes(id)) || null;
   const result = { entity_id: newId };

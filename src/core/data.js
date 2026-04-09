@@ -3,6 +3,7 @@
  */
 import { evaluate, evaluateAsync, KNOWN_PATHS } from '../connection.js';
 import { escapeJsString } from '../sanitize.js';
+import { ErrorCodes } from '../errors.js';
 
 const MAX_OHLCV_BARS = 500;
 const MAX_TRADES = 20;
@@ -64,6 +65,7 @@ function buildGraphicsJS(collectionName, mapKey, filter) {
 export async function getOhlcv({ count, summary } = {}) {
   const limit = Math.min(count || 100, MAX_OHLCV_BARS);
   let data;
+  let fetchError = null;
   try {
     data = await evaluate(`
       (function() {
@@ -79,10 +81,16 @@ export async function getOhlcv({ count, summary } = {}) {
         return {bars: result, total_bars: bars.size(), source: 'direct_bars'};
       })()
     `);
-  } catch { data = null; }
+  } catch (e) {
+    fetchError = e.message || String(e);
+    data = null;
+  }
 
   if (!data || !data.bars || data.bars.length === 0) {
-    throw new Error('Could not extract OHLCV data. The chart may still be loading.');
+    const err = new Error('Could not extract OHLCV data. The chart may still be loading.');
+    err.code = ErrorCodes.CHART_NOT_READY;
+    err.details = { fetch_error: fetchError };
+    throw err;
   }
 
   if (summary) {
@@ -114,15 +122,19 @@ export async function getIndicator({ entity_id }) {
     (function() {
       var api = ${CHART_API};
       var study = api.getStudyById('${escapedId}');
-      if (!study) return { error: 'Study not found: ${escapedId}' };
-      var result = { name: null, inputs: null, visible: null };
-      try { result.visible = study.isVisible(); } catch(e) {}
-      try { result.inputs = study.getInputValues(); } catch(e) { result.inputs_error = e.message; }
+      if (!study) return { error: 'Study not found: ${escapedId}', code: 'SELECTOR_NOT_FOUND' };
+      var result = { name: null, inputs: null, visible: null, errors: [] };
+      try { result.visible = study.isVisible(); } catch(e) { result.errors.push({field:'visible', message: e.message}); }
+      try { result.inputs = study.getInputValues(); } catch(e) { result.errors.push({field:'inputs', message: e.message}); }
       return result;
     })()
   `);
 
-  if (data?.error) throw new Error(data.error);
+  if (data?.error) {
+    const err = new Error(data.error);
+    err.code = data.code || ErrorCodes.UNEXPECTED_API_SHAPE;
+    throw err;
+  }
 
   let inputs = data?.inputs;
   if (Array.isArray(inputs)) {
@@ -132,7 +144,7 @@ export async function getIndicator({ entity_id }) {
       return true;
     });
   }
-  return { success: true, entity_id, visible: data?.visible, inputs };
+  return { success: true, entity_id, visible: data?.visible, inputs, partial_errors: data?.errors?.length ? data.errors : undefined };
 }
 
 export async function getStrategyResults() {
@@ -250,33 +262,42 @@ export async function getQuote({ symbol } = {}) {
     (function() {
       var api = ${CHART_API};
       var sym = '${escapeJsString(symbol || '')}';
-      if (!sym) { try { sym = api.symbol(); } catch(e) {} }
-      if (!sym) { try { sym = api.symbolExt().symbol; } catch(e) {} }
+      var errors = [];
+      if (!sym) { try { sym = api.symbol(); } catch(e) { errors.push({field:'symbol', message: e.message}); } }
+      if (!sym) { try { sym = api.symbolExt().symbol; } catch(e) { errors.push({field:'symbolExt', message: e.message}); } }
       var ext = {};
-      try { ext = api.symbolExt() || {}; } catch(e) {}
+      try { ext = api.symbolExt() || {}; } catch(e) { errors.push({field:'symbolExt_full', message: e.message}); }
       var bars = ${BARS_PATH};
       var quote = { symbol: sym };
       if (bars && typeof bars.lastIndex === 'function') {
         var last = bars.valueAt(bars.lastIndex());
         if (last) { quote.time = last[0]; quote.open = last[1]; quote.high = last[2]; quote.low = last[3]; quote.close = last[4]; quote.last = last[4]; quote.volume = last[5] || 0; }
+      } else {
+        errors.push({field:'bars', message:'mainSeries bars API not available'});
       }
       try {
         var bidEl = document.querySelector('[class*="bid"] [class*="price"], [class*="dom-"] [class*="bid"]');
         var askEl = document.querySelector('[class*="ask"] [class*="price"], [class*="dom-"] [class*="ask"]');
         if (bidEl) quote.bid = parseFloat(bidEl.textContent.replace(/[^0-9.\\-]/g, ''));
         if (askEl) quote.ask = parseFloat(askEl.textContent.replace(/[^0-9.\\-]/g, ''));
-      } catch(e) {}
+      } catch(e) { errors.push({field:'bid_ask', message: e.message}); }
       try {
         var hdr = document.querySelector('[class*="headerRow"] [class*="last-"]');
         if (hdr) { var hdrPrice = parseFloat(hdr.textContent.replace(/[^0-9.\\-]/g, '')); if (!isNaN(hdrPrice)) quote.header_price = hdrPrice; }
-      } catch(e) {}
+      } catch(e) { errors.push({field:'header_price', message: e.message}); }
       if (ext.description) quote.description = ext.description;
       if (ext.exchange) quote.exchange = ext.exchange;
       if (ext.type) quote.type = ext.type;
+      if (errors.length > 0) quote._partial_errors = errors;
       return quote;
     })()
   `);
-  if (!data || (!data.last && !data.close)) throw new Error('Could not retrieve quote. The chart may still be loading.');
+  if (!data || (!data.last && !data.close)) {
+    const err = new Error('Could not retrieve quote. The chart may still be loading.');
+    err.code = ErrorCodes.CHART_NOT_READY;
+    err.details = { partial: data };
+    throw err;
+  }
   return { success: true, ...data };
 }
 
@@ -331,13 +352,15 @@ export async function getStudyValues() {
       var model = chart.model();
       var sources = model.model().dataSources();
       var results = [];
+      var errors = [];
       for (var si = 0; si < sources.length; si++) {
         var s = sources[si];
         if (!s.metaInfo) continue;
+        var studyName = 'unknown';
         try {
           var meta = s.metaInfo();
-          var name = meta.description || meta.shortDescription || '';
-          if (!name) continue;
+          studyName = meta.description || meta.shortDescription || '';
+          if (!studyName) continue;
           var values = {};
           try {
             var dwv = s.dataWindowView();
@@ -350,14 +373,19 @@ export async function getStudyValues() {
                 }
               }
             }
-          } catch(e) {}
-          if (Object.keys(values).length > 0) results.push({ name: name, values: values });
-        } catch(e) {}
+          } catch(e) { errors.push({study: studyName, field:'dataWindowView', message: e.message}); }
+          if (Object.keys(values).length > 0) results.push({ name: studyName, values: values });
+        } catch(e) { errors.push({study: studyName, field:'meta', message: e.message}); }
       }
-      return results;
+      return { results: results, errors: errors };
     })()
   `);
-  return { success: true, study_count: data?.length || 0, studies: data || [] };
+  return {
+    success: true,
+    study_count: data?.results?.length || 0,
+    studies: data?.results || [],
+    partial_errors: data?.errors?.length ? data.errors : undefined,
+  };
 }
 
 export async function getPineLines({ study_filter, verbose } = {}) {

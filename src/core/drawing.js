@@ -265,6 +265,156 @@ export async function changePoint({ entity_id, index, point }) {
 }
 
 /**
+ * Draw a Risk/Reward Long or Short position in ONE call, with entry,
+ * stop-loss and take-profit set to exact prices — no post-creation
+ * tweaking required. Internally uses TradingView's internal
+ * `model.createLineTool` with `LineToolRiskRewardLong`/`Short` (the
+ * public `createShape`/`createMultipointShape` APIs do not accept
+ * `long_position` / `short_position` as shape names).
+ *
+ * The stopLevel/profitLevel values stored by the tool are integer
+ * "ticks" (offsets in units of `minmov / pricescale`). We compute them
+ * from the symbol's own `symbolInfo.pricescale` and `symbolInfo.minmov`
+ * so the same code works for BTC (tickSize 0.01), MNQ (tickSize 0.25),
+ * MES (tickSize 0.25), forex, etc.
+ *
+ * Direction is auto-detected from the prices when not given:
+ *   - long  → sl < entry < tp
+ *   - short → sl > entry > tp
+ *
+ * @param {Object}  opts
+ * @param {number}  opts.entry     entry price
+ * @param {number}  opts.sl        stop-loss price
+ * @param {number}  opts.tp        take-profit price
+ * @param {string}  [opts.direction]  'long' | 'short' (auto-detected if omitted)
+ * @param {number}  [opts.risk_pct]   risk % for the info block (default 1)
+ * @param {number}  [opts.account_size]  account size for qty calc (default 10000)
+ */
+export async function drawPosition({ entry, sl, tp, direction, risk_pct, account_size }) {
+  const entryPrice = validateNumber(entry, 'entry');
+  const slPrice = validateNumber(sl, 'sl');
+  const tpPrice = validateNumber(tp, 'tp');
+
+  // Auto-detect direction if not provided
+  let dir = direction ? String(direction).toLowerCase() : null;
+  if (!dir) {
+    if (slPrice < entryPrice && tpPrice > entryPrice) dir = 'long';
+    else if (slPrice > entryPrice && tpPrice < entryPrice) dir = 'short';
+    else {
+      const err = new Error(
+        `Cannot auto-detect direction from prices: entry=${entryPrice}, sl=${slPrice}, tp=${tpPrice}. ` +
+        'For LONG: sl < entry < tp. For SHORT: sl > entry > tp. Pass direction explicitly to override.'
+      );
+      err.code = ErrorCodes.INVALID_INPUT;
+      throw err;
+    }
+  }
+  if (dir !== 'long' && dir !== 'short') {
+    const err = new Error(`direction must be 'long' or 'short', got '${dir}'`);
+    err.code = ErrorCodes.INVALID_INPUT;
+    throw err;
+  }
+
+  // Validate sl/tp coherence with direction
+  if (dir === 'long' && !(slPrice < entryPrice && tpPrice > entryPrice)) {
+    const err = new Error(`LONG requires sl < entry < tp (got sl=${slPrice}, entry=${entryPrice}, tp=${tpPrice})`);
+    err.code = ErrorCodes.INVALID_INPUT;
+    throw err;
+  }
+  if (dir === 'short' && !(slPrice > entryPrice && tpPrice < entryPrice)) {
+    const err = new Error(`SHORT requires sl > entry > tp (got sl=${slPrice}, entry=${entryPrice}, tp=${tpPrice})`);
+    err.code = ErrorCodes.INVALID_INPUT;
+    throw err;
+  }
+
+  const linetool = dir === 'long' ? 'LineToolRiskRewardLong' : 'LineToolRiskRewardShort';
+  const riskPct = risk_pct != null ? validateNumber(risk_pct, 'risk_pct') : 1;
+  const accountSize = account_size != null ? validateNumber(account_size, 'account_size') : 10000;
+
+  const apiPath = await getChartApi();
+
+  // Everything in ONE evaluate call — create shape + set levels + read back id.
+  // We go through the INTERNAL model (_chartWidget.model()) rather than the
+  // public chartApi because long_position shapes need createLineTool, not
+  // createShape/createMultipointShape.
+  const result = await evaluate(`
+    (function() {
+      try {
+        var widget = ${apiPath};
+        var chartWidget = widget._chartWidget;
+        if (!chartWidget) return { error: 'no chartWidget', code: 'SELECTOR_NOT_FOUND' };
+        var model = chartWidget.model();
+        var innerModel = model.model();
+        var mainSeries = model.mainSeries();
+        var bars = mainSeries.bars();
+        var lastIdx = bars.lastIndex();
+        var panes = innerModel.panes();
+        var mainPane = panes[0];
+
+        // Symbol tick conversion: ticks = priceDelta * pricescale / minmov
+        var si = mainSeries.symbolInfo ? mainSeries.symbolInfo() : null;
+        var pricescale = (si && si.pricescale) || 100;
+        var minmov = (si && si.minmov) || 1;
+        var ticksPerPrice = pricescale / minmov;
+
+        var entryP = ${entryPrice};
+        var slP = ${slPrice};
+        var tpP = ${tpPrice};
+        var isLong = ${dir === 'long' ? 'true' : 'false'};
+        var stopDelta = isLong ? (entryP - slP) : (slP - entryP);
+        var profitDelta = isLong ? (tpP - entryP) : (entryP - tpP);
+        var stopLevel = Math.round(stopDelta * ticksPerPrice);
+        var profitLevel = Math.round(profitDelta * ticksPerPrice);
+
+        var shape = model.createLineTool({
+          pane: mainPane,
+          point: { index: lastIdx, price: entryP },
+          linetool: '${linetool}',
+          ownerSource: mainSeries
+        });
+        if (!shape) return { error: 'createLineTool returned null', code: 'UNKNOWN_ERROR' };
+
+        // Merge stop/profit/risk levels in the same pass
+        try {
+          shape.properties().merge({
+            stopLevel: stopLevel,
+            profitLevel: profitLevel,
+            risk: ${riskPct},
+            accountSize: ${accountSize}
+          });
+        } catch (e) { /* merge may throw on redraw check — values still apply */ }
+
+        var id = shape.id ? shape.id() : null;
+        return {
+          ok: true,
+          entity_id: id,
+          direction: isLong ? 'long' : 'short',
+          stop_level_ticks: stopLevel,
+          profit_level_ticks: profitLevel,
+          ticks_per_price: ticksPerPrice,
+          pricescale: pricescale,
+          minmov: minmov,
+          entry: entryP,
+          sl: slP,
+          tp: tpP,
+          risk_reward: +(profitDelta / stopDelta).toFixed(2),
+          last_index: lastIdx
+        };
+      } catch (e) {
+        return { error: e.message, code: 'UNKNOWN_ERROR' };
+      }
+    })()
+  `);
+
+  if (result?.error) {
+    const err = new Error(result.error);
+    err.code = result.code || ErrorCodes.UNKNOWN_ERROR;
+    throw err;
+  }
+  return { success: true, ...result };
+}
+
+/**
  * Translate a shape by a relative delta (time and/or price).
  * Works for any multi-point shape — internally offsets every point.
  */

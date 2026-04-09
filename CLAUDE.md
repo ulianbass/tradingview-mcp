@@ -62,8 +62,16 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 ### "Screen multiple symbols"
 - `batch_run` with `symbols: ["ES1!", "NQ1!", "YM1!"]` and `action: "screenshot"` or `"get_ohlcv"`
 
-### "Draw on the chart"
-- `draw_shape` → horizontal_line, trend_line, rectangle, text (pass point + optional point2)
+### "Draw a trade setup (long/short position)" — USE THIS, NOT LINES
+**MANDATORY RULE**: whenever the user asks you to draw, visualize, propose or analyze a trade (long, short, scalp, swing, breakout, reversal, etc.), you MUST use `draw_position`. NEVER draw trade setups with `horizontal_line`, `rectangle`, or `trend_line` — those produce ugly, inconsistent visuals and force the user to do the mental math. The native Risk/Reward Long/Short tool in TradingView shows entry, TP (green box), SL (red box), qty, R:R ratio, $ amount target and $ amount stop automatically.
+
+- `draw_position` → Long or Short Risk/Reward position in ONE call. Pass `entry`, `sl`, `tp` (direction is auto-detected: long when sl<entry<tp, short when sl>entry>tp). Tick size is read automatically from the symbol so it works for crypto, futures, forex and stocks.
+  - Example long: `draw_position({ entry: 70774, sl: 70690, tp: 70950 })` → creates native LineToolRiskRewardLong with stopLevel/profitLevel set in one pass.
+  - Example short: `draw_position({ entry: 24540, sl: 24580, tp: 24460 })` → auto-detects short.
+  - Do NOT create the shape and then fix stopLevel/profitLevel afterwards — the tool already does it atomically.
+
+### "Draw other shapes on the chart" (NOT for trade setups)
+- `draw_shape` → horizontal_line, trend_line, rectangle, text (pass point + optional point2). Use for marking levels/zones that are NOT part of a trade proposal.
 - `draw_list` → see what's drawn
 - `draw_remove_one` → remove by ID
 - `draw_clear` → remove all

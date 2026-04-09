@@ -93,18 +93,46 @@ export const Selectors = {
     '[aria-label*="Fullscreen"]',
   ],
 
-  // ─── Trading panel ───
+  // ─── Trading panel (Account Manager) ───
+  accountManagerRoot: [
+    '[class*="accountManager"]',
+    '[class*="account-manager"]',
+  ],
+  // Button that opens/closes the bottom Account Manager panel. Note the
+  // aria-label is localized — Spanish builds say "Gestor de cuentas",
+  // English says "Account Manager". We match both.
+  accountManagerToggleButton: [
+    'button[aria-label="Open Account Manager"]',
+    'button[aria-label="Abrir Gestor de cuentas"]',
+    'button[aria-label*="ccount Manager"]',
+    'button[aria-label*="estor de cuentas"]',
+  ],
+  accountManagerCloseButton: [
+    'button[aria-label="Close Account Manager"]',
+    'button[aria-label="Cerrar Gestor de cuentas"]',
+  ],
   tradingPanelButton: [
     '[data-name="trading-button"]',
     '[aria-label="Trading Panel"]',
   ],
+  // The data-name changed in recent TV versions to "<Broker>.positions-table".
+  // For paper trading it's "Paper.positions-table", for real brokers it's
+  // e.g. "Binance.positions-table", "IBKR.positions-table", etc.
   tradingPositionsTable: [
+    '[data-name$=".positions-table"]',
+    '[data-name="Paper.positions-table"]',
     '[data-name="positions"]',
     '[class*="positions-list"]',
   ],
   tradingOrdersTable: [
+    '[data-name$=".orders-table"]',
+    '[data-name="Paper.orders-table"]',
     '[data-name="orders"]',
     '[class*="orders-list"]',
+  ],
+  tradingEmptyStateRow: [
+    '[class*="emptyStateRow"]',
+    '[class*="empty-state"]',
   ],
 
   // ─── DOM / Depth ───

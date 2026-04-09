@@ -63,12 +63,27 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 - `batch_run` with `symbols: ["ES1!", "NQ1!", "YM1!"]` and `action: "screenshot"` or `"get_ohlcv"`
 
 ### "Draw a trade setup (long/short position)" — USE THIS, NOT LINES
-**MANDATORY RULE**: whenever the user asks you to draw, visualize, propose or analyze a trade (long, short, scalp, swing, breakout, reversal, etc.), you MUST use `draw_position`. NEVER draw trade setups with `horizontal_line`, `rectangle`, or `trend_line` — those produce ugly, inconsistent visuals and force the user to do the mental math. The native Risk/Reward Long/Short tool in TradingView shows entry, TP (green box), SL (red box), qty, R:R ratio, $ amount target and $ amount stop automatically.
+**MANDATORY RULE**: whenever the user asks you to draw, visualize, propose or analyze a trade (long, short, scalp, swing, breakout, reversal, etc.), you MUST follow this sequence **in order**:
+
+1. **FIRST** call `trading_get_positions` AND `trading_get_orders`. Inspect the response:
+   - If `warning: 'panel_closed'` → tell the user you can't verify their current state and ask them to open the Account Manager (or report the issue so selectors can be updated). DO NOT proceed.
+   - If `position_count > 0` → the user already has an open position. Report it and ask whether this new trade should replace it, add to it, or be cancelled. DO NOT silently propose a new trade on top.
+   - If `order_count > 0` → there are pending orders. Report them and ask.
+   - If `empty_state_text` is set AND both counts are 0 → clear to proceed.
+2. **THEN** call `draw_position` with the entry/SL/TP.
+3. NEVER suggest "you can fire the order now" without having confirmed the Account Manager state in step 1. The user might already have the trade running.
+
+**NEVER draw trade setups with `horizontal_line`, `rectangle`, or `trend_line`** — those produce ugly, inconsistent visuals and force the user to do the mental math. The native Risk/Reward Long/Short tool in TradingView shows entry, TP (green box), SL (red box), qty, R:R ratio, $ amount target and $ amount stop automatically.
 
 - `draw_position` → Long or Short Risk/Reward position in ONE call. Pass `entry`, `sl`, `tp` (direction is auto-detected: long when sl<entry<tp, short when sl>entry>tp). Tick size is read automatically from the symbol so it works for crypto, futures, forex and stocks.
   - Example long: `draw_position({ entry: 70774, sl: 70690, tp: 70950 })` → creates native LineToolRiskRewardLong with stopLevel/profitLevel set in one pass.
   - Example short: `draw_position({ entry: 24540, sl: 24580, tp: 24460 })` → auto-detects short.
   - Do NOT create the shape and then fix stopLevel/profitLevel afterwards — the tool already does it atomically.
+
+### "What positions / orders do I have right now?"
+- `trading_get_positions` → reads the Account Manager positions table. **Auto-opens the bottom panel if it's collapsed.** Returns `panel_open`, `position_count`, `positions[]`, `columns[]`, `empty_state_text`, and a `warning: 'panel_closed'` field if it could not read. Check `empty_state_text` to distinguish "no positions" (readable, empty) from "could not read".
+- `trading_get_orders` → same contract for pending orders.
+- These are READ-ONLY. Execution of any trade must be done by the user directly.
 
 ### "Draw other shapes on the chart" (NOT for trade setups)
 - `draw_shape` → horizontal_line, trend_line, rectangle, text (pass point + optional point2). Use for marking levels/zones that are NOT part of a trade proposal.

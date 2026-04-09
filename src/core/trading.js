@@ -30,45 +30,51 @@ import { sleep } from '../await.js';
  * Returns { opened, already_open, toggle_found }.
  */
 export async function ensureAccountManagerOpen() {
+  // Single-round-trip version: detect state, click toggle if needed, and
+  // poll for the tables table to appear — all in ONE evaluate. Previously
+  // this took 3 CDP round-trips + a hard 400ms sleep (~550ms total);
+  // now it's 1 round-trip with busy-wait and exits as soon as the table
+  // mounts (~50-150ms in practice).
   const rootSelectors = JSON.stringify(Selectors.accountManagerRoot);
   const toggleSelectors = JSON.stringify(Selectors.accountManagerToggleButton);
-  const closeSelectors = JSON.stringify(Selectors.accountManagerCloseButton);
+  const tableSelectors = JSON.stringify(Selectors.tradingPositionsTable);
 
-  const state = await evaluate(`
+  const result = await evaluate(`
     (function() {
       var rs = ${rootSelectors};
-      var root = null;
-      for (var i = 0; i < rs.length; i++) {
-        root = document.querySelector(rs[i]);
-        if (root) break;
-      }
-      if (!root) return { root_found: false };
-      var h = root.clientHeight;
-      var visible = root.offsetParent !== null && h > 10;
-      return { root_found: true, height: h, visible: visible };
-    })()
-  `);
-
-  if (state?.visible) {
-    return { opened: false, already_open: true, toggle_found: true };
-  }
-
-  const toggled = await evaluate(`
-    (function() {
       var ts = ${toggleSelectors};
-      var cs = ${closeSelectors};
-      // "Close" button appears when panel is open; we only want the "Open" one
-      // but in some locales the toggle label flips between Open/Close, so we
-      // try the open selectors first and fall through to any toggle that
-      // matches account manager text.
+      var tbl = ${tableSelectors};
+
+      function findRoot() {
+        for (var i = 0; i < rs.length; i++) {
+          var el = document.querySelector(rs[i]);
+          if (el) return el;
+        }
+        return null;
+      }
+      function isVisible(el) {
+        return !!(el && el.offsetParent !== null && el.clientHeight > 10);
+      }
+      function findTable() {
+        for (var i = 0; i < tbl.length; i++) {
+          var el = document.querySelector(tbl[i]);
+          if (el) return el;
+        }
+        return null;
+      }
+
+      var root = findRoot();
+      if (isVisible(root) && findTable()) {
+        return { opened: false, already_open: true, toggle_found: true, waited_ms: 0 };
+      }
+
+      // Click the toggle button
       var btn = null;
       for (var i = 0; i < ts.length; i++) {
         btn = document.querySelector(ts[i]);
         if (btn) break;
       }
       if (!btn) {
-        // Fallback: any button whose text is "Paper trading" and aria is
-        // localized account manager toggle. Enumerate buttons.
         var all = document.querySelectorAll('button');
         for (var j = 0; j < all.length; j++) {
           var txt = (all[j].textContent || '').trim();
@@ -79,37 +85,26 @@ export async function ensureAccountManagerOpen() {
           }
         }
       }
-      if (!btn) return { clicked: false, toggle_found: false };
+      if (!btn) return { opened: false, already_open: false, toggle_found: false, waited_ms: 0 };
       btn.click();
-      return { clicked: true, toggle_found: true };
-    })()
-  `);
 
-  if (!toggled?.clicked) {
-    return { opened: false, already_open: false, toggle_found: false };
-  }
-
-  // Give TV time to mount the tables
-  await sleep(400);
-
-  const postState = await evaluate(`
-    (function() {
-      var rs = ${rootSelectors};
-      var root = null;
-      for (var i = 0; i < rs.length; i++) {
-        root = document.querySelector(rs[i]);
-        if (root) break;
+      // Busy-wait up to 500ms, checking every 25ms. Exits as soon as the
+      // table actually mounts — usually ~50-100ms.
+      var start = Date.now();
+      var deadline = start + 500;
+      while (Date.now() < deadline) {
+        if (findTable()) {
+          return { opened: true, already_open: false, toggle_found: true, waited_ms: Date.now() - start };
+        }
+        // Busy-wait: tight loop ~25ms
+        var waitUntil = Date.now() + 25;
+        while (Date.now() < waitUntil) { /* spin */ }
       }
-      if (!root) return { visible: false };
-      return { visible: root.offsetParent !== null && root.clientHeight > 10 };
+      return { opened: false, already_open: false, toggle_found: true, waited_ms: Date.now() - start, timeout: true };
     })()
   `);
 
-  return {
-    opened: !!postState?.visible,
-    already_open: false,
-    toggle_found: true,
-  };
+  return result || { opened: false, already_open: false, toggle_found: false };
 }
 
 /**

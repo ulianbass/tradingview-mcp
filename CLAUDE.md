@@ -62,26 +62,41 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 ### "Screen multiple symbols"
 - `batch_run` with `symbols: ["ES1!", "NQ1!", "YM1!"]` and `action: "screenshot"` or `"get_ohlcv"`
 
-### "Draw a trade setup (long/short position)" — USE THIS, NOT LINES
-**MANDATORY RULE**: whenever the user asks you to draw, visualize, propose or analyze a trade (long, short, scalp, swing, breakout, reversal, etc.), you MUST follow this sequence **in order**:
+### "Analyze and propose a scalp / market-order trade" — USE trade_snapshot FIRST
+**MANDATORY SCALPING FAST PATH**: for any request that looks like "analyze X and tell me where to enter / scalp X / open a position on X", follow this 2-call sequence. Total latency target: under 300 ms.
 
-1. **FIRST** call `trading_get_positions` AND `trading_get_orders`. Inspect the response:
-   - If `warning: 'panel_closed'` → tell the user you can't verify their current state and ask them to open the Account Manager (or report the issue so selectors can be updated). DO NOT proceed.
-   - If `position_count > 0` → the user already has an open position. Report it and ask whether this new trade should replace it, add to it, or be cancelled. DO NOT silently propose a new trade on top.
-   - If `order_count > 0` → there are pending orders. Report them and ask.
-   - If `empty_state_text` is set AND both counts are 0 → clear to proceed.
-2. **THEN** call `draw_position` with the entry/SL/TP.
-3. NEVER suggest "you can fire the order now" without having confirmed the Account Manager state in step 1. The user might already have the trade running.
+1. **`trade_snapshot`** — one single CDP round-trip (~50-150 ms) that returns:
+   - `chart` → symbol, resolution, last_index, pricescale, minmov
+   - `quote` → last/open/high/low/volume/time of the current bar
+   - `ohlcv` → range, change %, avg volume, and the last 5 raw bars
+   - `indicators` → values of every visible study (RSI, MACD, ...)
+   - `positions` → `{ panel_open, count, items, empty_state }` (auto-opens the bottom panel if collapsed)
+   - `orders` → same shape
+   - `ready_to_trade` → true iff panel_open AND zero positions AND zero orders
+2. **`draw_position`** — one more round-trip to draw the native Long/Short box with entry/SL/TP.
 
+Do NOT fall back to the slow multi-call path (chart_get_state + quote_get + data_get_ohlcv + data_get_study_values + trading_get_positions + trading_get_orders) for scalping. That path is for deep research, not for executing a trade in real time.
+
+**Behavioral rules when reading `trade_snapshot`**:
+- If `positions.panel_open` is false → tell the user you couldn't read the Account Manager and ask them to open it. DO NOT propose a trade.
+- If `positions.count > 0` → the user already has an open position. Report the row(s) from `positions.items` and ask whether the new trade should replace, add, or be cancelled. DO NOT silently stack a new trade on top.
+- If `orders.count > 0` → there are pending orders. Same rule: report and ask.
+- If `ready_to_trade` is true → proceed straight to `draw_position`. Do not re-confirm with extra tool calls.
+
+### Minimum Risk:Reward — HARD RULE: **1:2 or bigger**
+**`draw_position` rejects any setup with R:R < 2 by default.** This is a project-level rule, enforced in code (`DEFAULT_MIN_RR = 2`). If the tool throws with `INVALID_INPUT` and a message like `Risk/reward 1.5 is below the minimum 2`, DO NOT pass `min_rr: 1` to bypass it — re-plan the trade with a tighter SL, a wider TP, or skip the setup entirely. Only override `min_rr` with explicit user authorization for the specific trade.
+
+### "Draw a trade setup (long/short position)" — USE draw_position, NOT LINES
 **NEVER draw trade setups with `horizontal_line`, `rectangle`, or `trend_line`** — those produce ugly, inconsistent visuals and force the user to do the mental math. The native Risk/Reward Long/Short tool in TradingView shows entry, TP (green box), SL (red box), qty, R:R ratio, $ amount target and $ amount stop automatically.
 
-- `draw_position` → Long or Short Risk/Reward position in ONE call. Pass `entry`, `sl`, `tp` (direction is auto-detected: long when sl<entry<tp, short when sl>entry>tp). Tick size is read automatically from the symbol so it works for crypto, futures, forex and stocks.
-  - Example long: `draw_position({ entry: 70774, sl: 70690, tp: 70950 })` → creates native LineToolRiskRewardLong with stopLevel/profitLevel set in one pass.
-  - Example short: `draw_position({ entry: 24540, sl: 24580, tp: 24460 })` → auto-detects short.
+- `draw_position` → Long or Short Risk/Reward position in ONE call. Pass `entry`, `sl`, `tp` (direction is auto-detected: long when sl<entry<tp, short when sl>entry>tp). Tick size is read automatically from the symbol so it works for crypto, futures, forex and stocks. R:R gate enforced at `min_rr = 2`.
+  - Example long: `draw_position({ entry: 70774, sl: 70690, tp: 70950 })` → R:R 2.1, accepted.
+  - Example rejected: `draw_position({ entry: 70774, sl: 70700, tp: 70850 })` → R:R 1.03, THROWS. Re-plan.
   - Do NOT create the shape and then fix stopLevel/profitLevel afterwards — the tool already does it atomically.
 
 ### "What positions / orders do I have right now?"
-- `trading_get_positions` → reads the Account Manager positions table. **Auto-opens the bottom panel if it's collapsed.** Returns `panel_open`, `position_count`, `positions[]`, `columns[]`, `empty_state_text`, and a `warning: 'panel_closed'` field if it could not read. Check `empty_state_text` to distinguish "no positions" (readable, empty) from "could not read".
+Prefer `trade_snapshot` over these when you also need quote/bars — it's one round-trip instead of three.
+- `trading_get_positions` → reads the Account Manager positions table. **Auto-opens the bottom panel if it's collapsed** (single-round-trip with polling). Returns `panel_open`, `position_count`, `positions[]`, `columns[]`, `empty_state_text`, and a `warning: 'panel_closed'` field if it could not read. Check `empty_state_text` to distinguish "no positions" (readable, empty) from "could not read".
 - `trading_get_orders` → same contract for pending orders.
 - These are READ-ONLY. Execution of any trade must be done by the user directly.
 

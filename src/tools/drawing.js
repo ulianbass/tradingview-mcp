@@ -65,16 +65,17 @@ export function registerDrawingTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message, code: err.code }, true); }
   });
 
-  server.tool('draw_position', 'Draw a Risk/Reward LONG or SHORT position tool natively at the current bar, with entry, stop-loss and take-profit set to exact prices IN ONE CALL. This is the ONLY correct way to visualize a proposed trade — do NOT use horizontal_line or rectangle for trade setups. Direction is auto-detected from prices (long: sl < entry < tp, short: sl > entry > tp). Symbol tick size is read automatically from symbolInfo.pricescale/minmov so this works for crypto (BTC tick 0.01), futures (MNQ/MES tick 0.25), forex, and stocks.', {
+  server.tool('draw_position', 'Draw a Risk/Reward LONG or SHORT position tool natively at the current bar, with entry, stop-loss and take-profit set to exact prices IN ONE CALL. This is the ONLY correct way to visualize a proposed trade — do NOT use horizontal_line or rectangle for trade setups. Direction is auto-detected from prices (long: sl < entry < tp, short: sl > entry > tp). Symbol tick size is read automatically from symbolInfo.pricescale/minmov so this works for crypto (BTC tick 0.01), futures (MNQ/MES tick 0.25), forex, and stocks. REJECTS setups with R:R < 2 by default (pass min_rr to override, not recommended).', {
     entry: z.coerce.number().describe('Entry price'),
     sl: z.coerce.number().describe('Stop-loss price'),
     tp: z.coerce.number().describe('Take-profit price'),
     direction: z.enum(['long', 'short']).optional().describe('long | short. If omitted, auto-detected from the price order.'),
     risk_pct: z.coerce.number().optional().describe('Risk % for the info block qty calc (default 1)'),
     account_size: z.coerce.number().optional().describe('Account size for info block qty calc (default 10000)'),
-  }, async ({ entry, sl, tp, direction, risk_pct, account_size }) => {
-    try { return jsonResult(await core.drawPosition({ entry, sl, tp, direction, risk_pct, account_size })); }
-    catch (err) { return jsonResult({ success: false, error: err.message, code: err.code }, true); }
+    min_rr: z.coerce.number().optional().describe('Minimum risk/reward ratio gate (default 2). Setups below this are rejected.'),
+  }, async ({ entry, sl, tp, direction, risk_pct, account_size, min_rr }) => {
+    try { return jsonResult(await core.drawPosition({ entry, sl, tp, direction, risk_pct, account_size, min_rr })); }
+    catch (err) { return jsonResult({ success: false, error: err.message, code: err.code, details: err.details }, true); }
   });
 
   server.tool('draw_move', 'Translate a drawing by a relative delta in time and/or price. Works for any multi-point shape — offsets every point equally.', {

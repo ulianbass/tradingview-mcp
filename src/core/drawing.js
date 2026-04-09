@@ -265,6 +265,14 @@ export async function changePoint({ entity_id, index, point }) {
 }
 
 /**
+ * Minimum Risk/Reward ratio enforced by drawPosition. Setups below this
+ * are rejected at the tool level so the agent CANNOT silently propose a
+ * scalp with worse than 1:2. Override per call with `min_rr` if you
+ * have a concrete reason (documented in CLAUDE.md rules).
+ */
+export const DEFAULT_MIN_RR = 2;
+
+/**
  * Draw a Risk/Reward Long or Short position in ONE call, with entry,
  * stop-loss and take-profit set to exact prices — no post-creation
  * tweaking required. Internally uses TradingView's internal
@@ -282,6 +290,11 @@ export async function changePoint({ entity_id, index, point }) {
  *   - long  → sl < entry < tp
  *   - short → sl > entry > tp
  *
+ * Minimum R:R guard: setups with R:R < 2 are REJECTED with a clear
+ * error unless the caller explicitly overrides `min_rr`. This enforces
+ * the project rule that no trade should be proposed with worse than
+ * 1:2 risk/reward. Pass `min_rr: 0` to disable (not recommended).
+ *
  * @param {Object}  opts
  * @param {number}  opts.entry     entry price
  * @param {number}  opts.sl        stop-loss price
@@ -289,8 +302,9 @@ export async function changePoint({ entity_id, index, point }) {
  * @param {string}  [opts.direction]  'long' | 'short' (auto-detected if omitted)
  * @param {number}  [opts.risk_pct]   risk % for the info block (default 1)
  * @param {number}  [opts.account_size]  account size for qty calc (default 10000)
+ * @param {number}  [opts.min_rr]     minimum R:R ratio (default 2)
  */
-export async function drawPosition({ entry, sl, tp, direction, risk_pct, account_size }) {
+export async function drawPosition({ entry, sl, tp, direction, risk_pct, account_size, min_rr }) {
   const entryPrice = validateNumber(entry, 'entry');
   const slPrice = validateNumber(sl, 'sl');
   const tpPrice = validateNumber(tp, 'tp');
@@ -324,6 +338,23 @@ export async function drawPosition({ entry, sl, tp, direction, risk_pct, account
   if (dir === 'short' && !(slPrice > entryPrice && tpPrice < entryPrice)) {
     const err = new Error(`SHORT requires sl > entry > tp (got sl=${slPrice}, entry=${entryPrice}, tp=${tpPrice})`);
     err.code = ErrorCodes.INVALID_INPUT;
+    throw err;
+  }
+
+  // R:R guard — reject setups below the minimum ratio (default 2)
+  const stopDeltaPrice = dir === 'long' ? (entryPrice - slPrice) : (slPrice - entryPrice);
+  const profitDeltaPrice = dir === 'long' ? (tpPrice - entryPrice) : (entryPrice - tpPrice);
+  const rr = +(profitDeltaPrice / stopDeltaPrice).toFixed(3);
+  const minRr = min_rr != null ? validateNumber(min_rr, 'min_rr') : DEFAULT_MIN_RR;
+  if (rr < minRr) {
+    const err = new Error(
+      `Risk/reward ${rr} is below the minimum ${minRr}. ` +
+      `Current setup: entry=${entryPrice}, sl=${slPrice}, tp=${tpPrice}, ` +
+      `risk=${stopDeltaPrice.toFixed(4)}, reward=${profitDeltaPrice.toFixed(4)}. ` +
+      `Re-plan with a wider TP or tighter SL, or pass min_rr explicitly to override.`
+    );
+    err.code = ErrorCodes.INVALID_INPUT;
+    err.details = { rr, min_rr: minRr, entry: entryPrice, sl: slPrice, tp: tpPrice };
     throw err;
   }
 

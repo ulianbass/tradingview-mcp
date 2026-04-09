@@ -224,13 +224,49 @@ Overall: Cautious session. BTC leading bearish, SOL the exception — watch for 
 - **Pine Script development** — write, inject, compile, debug scripts with AI
 - **Chart navigation** — change symbols, timeframes, zoom to dates, add/remove indicators
 - **Visual analysis** — read indicator values, price levels, drawn levels from custom indicators
-- **Draw on charts** — trend lines, horizontal levels, rectangles, text
+- **Draw on charts** — trend lines, horizontal levels, rectangles, text, Fibonacci, pitchforks, channels
 - **Manage alerts** — create, list, delete price alerts
 - **Replay practice** — step through historical bars, practice entries and exits with P&L tracking
 - **Screenshots** — capture chart state
 - **Multi-pane layouts** — 2x2, 3x1 grids with different symbols per pane
 - **Stream data** — JSONL output from your live chart for monitoring scripts
+- **Trade execution (consent-gated)** — place/cancel/close orders in Trading Panel (paper or broker)
 - **CLI access** — every tool is also a `tv` command, pipe-friendly JSON output
+
+---
+
+## Trade Execution — Consent Model
+
+This fork supports placing orders through the TradingView Trading Panel, for **both paper trading and live broker integrations**. Execution is gated behind an explicit consent parameter to prevent accidental triggering.
+
+### How the gate works
+
+Every order-execution tool (`trading_submit_order`, `trading_cancel_order`, `trading_close_position`) requires `consent: true` as a parameter. The gate uses **strict equality** — `'true'` (string), `1` (number), `false`, or a missing field will all be rejected with `INVALID_INPUT` before the tool touches CDP.
+
+```js
+// ❌ REJECTED — no consent field
+trading_submit_order({ side: 'buy', order_type: 'market', quantity: 0.1 })
+
+// ❌ REJECTED — wrong type
+trading_submit_order({ consent: 'true', side: 'buy', order_type: 'market', quantity: 0.1 })
+
+// ✅ ALLOWED — explicit boolean true
+trading_submit_order({ consent: true, side: 'buy', order_type: 'market', quantity: 0.1 })
+```
+
+### The gate applies equally to paper and live
+
+There is no "paper trading is free pass" exemption. The reasoning: building the habit of explicit consent on paper trades means live trades aren't a new pattern — they're the same pattern against a different backend. The tool reports the active mode (`paper`, `broker`, `not_connected`, or `unknown`) in its response so you can verify before trusting the execution.
+
+Use `trading_detect_mode` (no consent needed — it's read-only) to check which mode is active before submitting.
+
+### AI assistant behavior note
+
+Some AI assistants have their own built-in policies against executing trades on a user's behalf, and may refuse to call these tools even with explicit consent. That's the assistant's prerogative — the tool itself is permission-granted by virtue of the consent parameter. If you hit that refusal, you can:
+
+1. Use a different AI tool (Codex, a custom client) that is fine with it
+2. Call the tool directly yourself
+3. Review each order and execute manually via the Trading Panel
 
 ---
 

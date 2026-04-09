@@ -168,3 +168,140 @@ export async function clearAll() {
   await evaluate(`${apiPath}.removeAllShapes()`);
   return { success: true, action: 'all_shapes_removed' };
 }
+
+/**
+ * Replace all points of an existing shape at once.
+ * The number of points MUST match what the shape expects (1 for
+ * horizontal_line, 2 for trend_line/fib, 3 for pitchfork, etc).
+ */
+export async function updatePoints({ entity_id, points }) {
+  if (!entity_id) {
+    const err = new Error('entity_id is required');
+    err.code = ErrorCodes.INVALID_INPUT;
+    throw err;
+  }
+  if (!Array.isArray(points) || points.length === 0) {
+    const err = new Error('points must be a non-empty array of {time, price} objects');
+    err.code = ErrorCodes.INVALID_INPUT;
+    throw err;
+  }
+  const validated = points.map((p, i) => ({
+    time: validateNumber(p.time, `points[${i}].time`),
+    price: validateNumber(p.price, `points[${i}].price`),
+  }));
+  const apiPath = await getChartApi();
+  const escapedId = escapeJsString(entity_id);
+  const pointsJson = JSON.stringify(validated);
+
+  const result = await evaluate(`
+    (function() {
+      try {
+        var api = ${apiPath};
+        var shape = api.getShapeById('${escapedId}');
+        if (!shape) return { error: 'Shape not found: ${escapedId}', code: 'SELECTOR_NOT_FOUND' };
+        var expected = shape.getPoints().length;
+        if (${validated.length} !== expected) {
+          return { error: 'Wrong point count. Shape requires ' + expected + ', got ${validated.length}', code: 'INVALID_INPUT', expected: expected };
+        }
+        shape.setPoints(${pointsJson});
+        return { ok: true, new_points: shape.getPoints() };
+      } catch(e) { return { error: e.message, code: 'UNKNOWN_ERROR' }; }
+    })()
+  `);
+
+  if (result?.error) {
+    const err = new Error(result.error);
+    err.code = result.code || ErrorCodes.UNKNOWN_ERROR;
+    err.details = result;
+    throw err;
+  }
+  return { success: true, entity_id, points: result.new_points };
+}
+
+/**
+ * Change a single point of a shape by index (0-based).
+ * Useful when you only want to move one endpoint of a trend line or
+ * one handle of a pitchfork, leaving the others in place.
+ */
+export async function changePoint({ entity_id, index, point }) {
+  if (!entity_id) {
+    const err = new Error('entity_id is required');
+    err.code = ErrorCodes.INVALID_INPUT;
+    throw err;
+  }
+  const idx = validateNumber(index, 'index');
+  if (idx < 0 || !Number.isInteger(idx)) {
+    const err = new Error('index must be a non-negative integer');
+    err.code = ErrorCodes.INVALID_INPUT;
+    throw err;
+  }
+  const t = validateNumber(point.time, 'point.time');
+  const p = validateNumber(point.price, 'point.price');
+  const apiPath = await getChartApi();
+  const escapedId = escapeJsString(entity_id);
+
+  const result = await evaluate(`
+    (function() {
+      try {
+        var api = ${apiPath};
+        var shape = api.getShapeById('${escapedId}');
+        if (!shape) return { error: 'Shape not found: ${escapedId}', code: 'SELECTOR_NOT_FOUND' };
+        var pts = shape.getPoints();
+        if (${idx} >= pts.length) {
+          return { error: 'Index ${idx} out of range (shape has ' + pts.length + ' points)', code: 'INVALID_INPUT' };
+        }
+        shape.changePoint({ time: ${t}, price: ${p} }, ${idx});
+        return { ok: true, new_points: shape.getPoints() };
+      } catch(e) { return { error: e.message, code: 'UNKNOWN_ERROR' }; }
+    })()
+  `);
+
+  if (result?.error) {
+    const err = new Error(result.error);
+    err.code = result.code || ErrorCodes.UNKNOWN_ERROR;
+    throw err;
+  }
+  return { success: true, entity_id, index: idx, points: result.new_points };
+}
+
+/**
+ * Translate a shape by a relative delta (time and/or price).
+ * Works for any multi-point shape — internally offsets every point.
+ */
+export async function moveShape({ entity_id, delta_time = 0, delta_price = 0 }) {
+  if (!entity_id) {
+    const err = new Error('entity_id is required');
+    err.code = ErrorCodes.INVALID_INPUT;
+    throw err;
+  }
+  const dt = validateNumber(delta_time, 'delta_time');
+  const dp = validateNumber(delta_price, 'delta_price');
+  if (dt === 0 && dp === 0) {
+    return { success: true, entity_id, note: 'delta_time and delta_price both zero, no change' };
+  }
+  const apiPath = await getChartApi();
+  const escapedId = escapeJsString(entity_id);
+
+  const result = await evaluate(`
+    (function() {
+      try {
+        var api = ${apiPath};
+        var shape = api.getShapeById('${escapedId}');
+        if (!shape) return { error: 'Shape not found: ${escapedId}', code: 'SELECTOR_NOT_FOUND' };
+        var pts = shape.getPoints();
+        var shifted = pts.map(function(p) {
+          return { time: p.time + ${dt}, price: p.price + ${dp} };
+        });
+        shape.setPoints(shifted);
+        return { ok: true, new_points: shape.getPoints() };
+      } catch(e) { return { error: e.message, code: 'UNKNOWN_ERROR' }; }
+    })()
+  `);
+
+  if (result?.error) {
+    const err = new Error(result.error);
+    err.code = result.code || ErrorCodes.UNKNOWN_ERROR;
+    throw err;
+  }
+  return { success: true, entity_id, delta_time: dt, delta_price: dp, points: result.new_points };
+}

@@ -47,4 +47,30 @@ export function registerDrawingTools(server) {
     try { return jsonResult(await core.drawMultipoint({ shape, points, overrides, text })); }
     catch (err) { return jsonResult({ success: false, error: err.message, code: err.code }, true); }
   });
+
+  server.tool('draw_update_points', 'Replace ALL points of an existing drawing at once. Point count must match what the shape type expects (1 for horizontal_line, 2 for trend/fib, 3 for pitchfork).', {
+    entity_id: z.string().describe('Entity ID of the drawing to update (from draw_list)'),
+    points: z.array(z.object({ time: z.coerce.number(), price: z.coerce.number() })).describe('New points. Must match the shape\'s expected point count.'),
+  }, async ({ entity_id, points }) => {
+    try { return jsonResult(await core.updatePoints({ entity_id, points })); }
+    catch (err) { return jsonResult({ success: false, error: err.message, code: err.code }, true); }
+  });
+
+  server.tool('draw_change_point', 'Move a single point of a drawing by index (0-based). Useful for dragging one endpoint of a trend line or one handle of a pitchfork while leaving the others.', {
+    entity_id: z.string().describe('Entity ID of the drawing (from draw_list)'),
+    index: z.coerce.number().int().min(0).describe('Point index (0-based)'),
+    point: z.object({ time: z.coerce.number(), price: z.coerce.number() }).describe('New {time, price} for that point'),
+  }, async ({ entity_id, index, point }) => {
+    try { return jsonResult(await core.changePoint({ entity_id, index, point })); }
+    catch (err) { return jsonResult({ success: false, error: err.message, code: err.code }, true); }
+  });
+
+  server.tool('draw_move', 'Translate a drawing by a relative delta in time and/or price. Works for any multi-point shape — offsets every point equally.', {
+    entity_id: z.string().describe('Entity ID of the drawing (from draw_list)'),
+    delta_time: z.coerce.number().optional().describe('Time offset in seconds (positive = right/newer, negative = left/older)'),
+    delta_price: z.coerce.number().optional().describe('Price offset (positive = up, negative = down)'),
+  }, async ({ entity_id, delta_time, delta_price }) => {
+    try { return jsonResult(await core.moveShape({ entity_id, delta_time, delta_price })); }
+    catch (err) { return jsonResult({ success: false, error: err.message, code: err.code }, true); }
+  });
 }

@@ -15,11 +15,11 @@ export function registerReplayTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('replay_autoplay', 'Toggle autoplay in replay mode, optionally set speed', {
-    speed: z.coerce.number().optional().describe('Autoplay delay in ms (lower = faster). Leave empty to just toggle. (default 0)'),
+  server.tool('replay_autoplay', 'Toggle autoplay in replay mode, optionally set speed. WARNING: speed must be one of 100, 143, 200, 300, 1000, 2000, 3000, 5000, 10000 ms. Invalid values permanently corrupt your TradingView cloud account autoplay state.', {
+    speed: z.coerce.number().optional().describe('Autoplay delay in ms. Must be one of: 100, 143, 200, 300, 1000, 2000, 3000, 5000, 10000. Leave empty to just toggle.'),
   }, async ({ speed }) => {
     try { return jsonResult(await core.autoplay({ speed })); }
-    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+    catch (err) { return jsonResult({ success: false, error: err.message, code: err.code }, true); }
   });
 
   server.tool('replay_stop', 'Stop replay and return to realtime', {}, async () => {

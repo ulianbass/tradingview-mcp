@@ -1,8 +1,21 @@
 /**
  * Core replay mode logic.
+ *
+ * Combines:
+ *   - Upstream fixes from tradesdontlie/tradingview-mcp (commits 596def81, 6ccac647):
+ *     * selectDate() promise handling + polling until replay is truly initialized
+ *     * step() polls until currentDate changes (doStep() is async internally)
+ *     * Removed hideReplayToolbar() calls (corrupts cloud account state)
+ *     * VALID_AUTOPLAY_DELAYS validation BEFORE any CDP call (invalid values
+ *       permanently corrupt _autoplayDelay across devices)
+ *   - Our security hardening: escapeJsString, validateNumber, ErrorCodes
  */
 import { evaluate, getReplayApi } from '../connection.js';
 import { escapeJsString, validateNumber } from '../sanitize.js';
+import { sleep } from '../await.js';
+import { ErrorCodes } from '../errors.js';
+
+export const VALID_AUTOPLAY_DELAYS = [100, 143, 200, 300, 1000, 2000, 3000, 5000, 10000];
 
 function wv(path) {
   return `(function(){ var v = ${path}; return (v && typeof v === 'object' && typeof v.value === 'function') ? v.value() : v; })()`;
@@ -11,53 +24,105 @@ function wv(path) {
 export async function start({ date } = {}) {
   const rp = await getReplayApi();
   const available = await evaluate(wv(`${rp}.isReplayAvailable()`));
-  if (!available) throw new Error('Replay is not available for the current symbol/timeframe');
-
-  await evaluate(`${rp}.showReplayToolbar()`);
-  await new Promise(r => setTimeout(r, 500));
-
-  if (date) await evaluate(`${rp}.selectDate(new Date('${escapeJsString(date)}'))`);
-  else await evaluate(`${rp}.selectFirstAvailableDate()`);
-  await new Promise(r => setTimeout(r, 1000));
-
-  // Check for "Data point unavailable" toast which corrupts the chart
-  const toast = await evaluate(`
-    (function() {
-      var toasts = document.querySelectorAll('[class*="toast"], [class*="notification"], [class*="banner"]');
-      for (var i = 0; i < toasts.length; i++) {
-        var text = toasts[i].textContent || '';
-        if (/data point unavailable|not available for playback/i.test(text)) return text.trim().substring(0, 200);
-      }
-      return null;
-    })()
-  `);
-
-  if (toast) {
-    // Stop replay to recover chart
-    try { await evaluate(`${rp}.stopReplay()`); } catch {}
-    try { await evaluate(`${rp}.hideReplayToolbar()`); } catch {}
-    throw new Error(`Replay date unavailable: "${toast}". The requested date has no data for this timeframe. Try a more recent date or switch to a higher timeframe (e.g., Daily).`);
+  if (!available) {
+    const err = new Error('Replay is not available for the current symbol/timeframe');
+    err.code = ErrorCodes.API_NOT_AVAILABLE;
+    throw err;
   }
 
-  const started = await evaluate(wv(`${rp}.isReplayStarted()`));
-  const currentDate = await evaluate(wv(`${rp}.currentDate()`));
-  return { success: true, replay_started: !!started, date: date || '(first available)', current_date: currentDate };
+  await evaluate(`${rp}.showReplayToolbar()`);
+
+  // selectDate() is async — it calls enableReplayMode() then _onPointSelected()
+  // which initializes the server-side replay session. Must be awaited inside the
+  // page context, otherwise the promise is fire-and-forget and replay state says
+  // "started" but stepping doesn't work.
+  if (date) {
+    const ts = new Date(date).getTime();
+    if (isNaN(ts)) {
+      const err = new Error(`Invalid date: "${date}". Use YYYY-MM-DD format or ISO 8601.`);
+      err.code = ErrorCodes.INVALID_INPUT;
+      throw err;
+    }
+    await evaluate(`${rp}.selectDate(${ts}).then(function() { return 'ok'; })`);
+  } else {
+    await evaluate(`${rp}.selectFirstAvailableDate()`);
+  }
+
+  // Poll until replay is fully initialized: isReplayStarted AND currentDate is set.
+  // selectDate()'s promise resolves before the data series is ready, so we need
+  // to wait for currentDate to become non-null before stepping will work.
+  let started = false;
+  let currentDate = null;
+  for (let i = 0; i < 30; i++) {
+    started = await evaluate(wv(`${rp}.isReplayStarted()`));
+    currentDate = await evaluate(wv(`${rp}.currentDate()`));
+    if (started && currentDate !== null) break;
+    await sleep(250);
+  }
+
+  if (!started) {
+    try { await evaluate(`${rp}.stopReplay()`); } catch {}
+    const err = new Error(
+      'Replay failed to start. The selected date may not have data for this timeframe. Try a more recent date or a higher timeframe (e.g., Daily).',
+    );
+    err.code = ErrorCodes.CHART_NOT_READY;
+    throw err;
+  }
+
+  return {
+    success: true,
+    replay_started: true,
+    date: date || '(first available)',
+    current_date: currentDate,
+  };
 }
 
 export async function step() {
   const rp = await getReplayApi();
   const started = await evaluate(wv(`${rp}.isReplayStarted()`));
-  if (!started) throw new Error('Replay is not started. Use replay_start first.');
+  if (!started) {
+    const err = new Error('Replay is not started. Use replay_start first.');
+    err.code = ErrorCodes.CHART_NOT_READY;
+    throw err;
+  }
+  const before = await evaluate(wv(`${rp}.currentDate()`));
   await evaluate(`${rp}.doStep()`);
-  const currentDate = await evaluate(wv(`${rp}.currentDate()`));
+
+  // doStep() is async internally — currentDate takes ~500ms to update.
+  // Poll until it changes or timeout after 3s.
+  let currentDate = before;
+  for (let i = 0; i < 12; i++) {
+    await sleep(250);
+    currentDate = await evaluate(wv(`${rp}.currentDate()`));
+    if (currentDate !== before) break;
+  }
   return { success: true, action: 'step', current_date: currentDate };
 }
 
 export async function autoplay({ speed } = {}) {
+  // CRITICAL: Validate BEFORE any CDP call — invalid values permanently corrupt
+  // _autoplayDelay in the TradingView cloud account state, causing assertion
+  // failures across all devices the user logs into.
+  if (speed != null && Number(speed) > 0 && !VALID_AUTOPLAY_DELAYS.includes(Number(speed))) {
+    const err = new Error(
+      `Invalid autoplay delay ${speed}ms. Valid values: ${VALID_AUTOPLAY_DELAYS.join(', ')}`,
+    );
+    err.code = ErrorCodes.INVALID_INPUT;
+    throw err;
+  }
+
   const rp = await getReplayApi();
   const started = await evaluate(wv(`${rp}.isReplayStarted()`));
-  if (!started) throw new Error('Replay is not started. Use replay_start first.');
-  if (speed > 0) await evaluate(`${rp}.changeAutoplayDelay(${validateNumber(speed, 'speed')})`);
+  if (!started) {
+    const err = new Error('Replay is not started. Use replay_start first.');
+    err.code = ErrorCodes.CHART_NOT_READY;
+    throw err;
+  }
+
+  if (speed != null && Number(speed) > 0) {
+    const validSpeed = validateNumber(speed, 'speed');
+    await evaluate(`${rp}.changeAutoplayDelay(${validSpeed})`);
+  }
   await evaluate(`${rp}.toggleAutoplay()`);
   const isAutoplay = await evaluate(wv(`${rp}.isAutoplayStarted()`));
   const currentDelay = await evaluate(wv(`${rp}.autoplayDelay()`));
@@ -65,27 +130,35 @@ export async function autoplay({ speed } = {}) {
 }
 
 export async function stop() {
+  // IMPORTANT: Do NOT call hideReplayToolbar() — it syncs hidden-toolbar state
+  // to the user's cloud account and permanently breaks replay controls on all
+  // devices the user logs into. stopReplay() alone is sufficient.
   const rp = await getReplayApi();
   const started = await evaluate(wv(`${rp}.isReplayStarted()`));
   if (!started) {
-    // Try to hide toolbar even if not started
-    try { await evaluate(`${rp}.hideReplayToolbar()`); } catch {}
     return { success: true, action: 'already_stopped' };
   }
   await evaluate(`${rp}.stopReplay()`);
-  try { await evaluate(`${rp}.hideReplayToolbar()`); } catch {}
   return { success: true, action: 'replay_stopped' };
 }
 
 export async function trade({ action }) {
   const rp = await getReplayApi();
   const started = await evaluate(wv(`${rp}.isReplayStarted()`));
-  if (!started) throw new Error('Replay is not started. Use replay_start first.');
+  if (!started) {
+    const err = new Error('Replay is not started. Use replay_start first.');
+    err.code = ErrorCodes.CHART_NOT_READY;
+    throw err;
+  }
 
   if (action === 'buy') await evaluate(`${rp}.buy()`);
   else if (action === 'sell') await evaluate(`${rp}.sell()`);
   else if (action === 'close') await evaluate(`${rp}.closePosition()`);
-  else throw new Error('Invalid action. Use: buy, sell, or close');
+  else {
+    const err = new Error('Invalid action. Use: buy, sell, or close');
+    err.code = ErrorCodes.INVALID_INPUT;
+    throw err;
+  }
 
   const position = await evaluate(wv(`${rp}.position()`));
   const pnl = await evaluate(wv(`${rp}.realizedPL()`));

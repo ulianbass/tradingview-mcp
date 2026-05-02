@@ -131,13 +131,27 @@ export async function manageIndicator({ action, indicator, entity_id, inputs: in
 }
 
 export async function getVisibleRange() {
-  const result = await evaluate(`
+  let result = await evaluate(`
     (function() {
       var chart = ${CHART_API};
       return { visible_range: chart.getVisibleRange(), bars_range: chart.getVisibleBarsRange() };
     })()
   `);
-  return { success: true, visible_range: result.visible_range, bars_range: result.bars_range };
+  const visible = result?.visible_range;
+  if (!visible || typeof visible.from !== 'number' || typeof visible.to !== 'number' || visible.to <= visible.from) {
+    await waitForChart({ timeout: 10000 });
+    result = await evaluate(`
+      (function() {
+        var chart = ${CHART_API};
+        return { visible_range: chart.getVisibleRange(), bars_range: chart.getVisibleBarsRange() };
+      })()
+    `);
+  }
+  return {
+    success: true,
+    visible_range: result?.visible_range || null,
+    bars_range: result?.bars_range || null,
+  };
 }
 
 export async function setVisibleRange({ from, to }) {
@@ -302,10 +316,19 @@ export async function symbolInfo() {
   const result = await evaluate(`
     (function() {
       var chart = ${CHART_API};
-      var info = chart.symbolExt();
+      var info = {};
+      try { info = chart.symbolExt() || {}; } catch(e) {}
+      var chartSymbol = '';
+      try { chartSymbol = chart.symbol() || ''; } catch(e2) {}
+      var exchange = info.exchange || '';
+      if (!exchange && chartSymbol.indexOf(':') >= 0) exchange = chartSymbol.split(':')[0];
       return {
-        symbol: info.symbol, full_name: info.full_name, exchange: info.exchange,
-        description: info.description, type: info.type, pro_name: info.pro_name,
+        symbol: info.symbol || (chartSymbol ? String(chartSymbol).split(':').pop() : ''),
+        full_name: info.full_name || chartSymbol,
+        exchange: exchange,
+        description: info.description || '',
+        type: info.type || '',
+        pro_name: info.pro_name || chartSymbol,
         typespecs: info.typespecs, resolution: chart.resolution(), chart_type: chart.chartType()
       };
     })()

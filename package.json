@@ -1,7 +1,7 @@
 {
   "name": "tradingview-mcp-repo",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Repository wrapper for TradingView MCP versioned product lines",
   "workspaces": [
     "versions/v1"

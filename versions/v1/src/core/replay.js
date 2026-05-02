@@ -12,7 +12,7 @@
  */
 import { evaluate, getReplayApi } from '../connection.js';
 import { escapeJsString, validateNumber } from '../sanitize.js';
-import { sleep } from '../await.js';
+import { sleep, waitForChart } from '../await.js';
 import { ErrorCodes } from '../errors.js';
 
 export const VALID_AUTOPLAY_DELAYS = [100, 143, 200, 300, 1000, 2000, 3000, 5000, 10000];
@@ -132,14 +132,94 @@ export async function autoplay({ speed } = {}) {
 export async function stop() {
   // IMPORTANT: Do NOT call hideReplayToolbar() — it syncs hidden-toolbar state
   // to the user's cloud account and permanently breaks replay controls on all
-  // devices the user logs into. stopReplay() alone is sufficient.
+  // devices the user logs into.
   const rp = await getReplayApi();
   const started = await evaluate(wv(`${rp}.isReplayStarted()`));
   if (!started) {
     return { success: true, action: 'already_stopped' };
   }
   await evaluate(`${rp}.stopReplay()`);
-  return { success: true, action: 'replay_stopped' };
+
+  let stillStarted = true;
+  let toolbarVisible = true;
+  let barsCount = 0;
+  for (let i = 0; i < 20; i++) {
+    await sleep(250);
+    const state = await evaluate(`
+      (function() {
+        var r = ${rp};
+        var chart = window.TradingViewApi._activeChartWidgetWV.value();
+        function unwrap(v) { return (v && typeof v === 'object' && typeof v.value === 'function') ? v.value() : v; }
+        var barsCount = 0;
+        try {
+          var bars = chart._chartWidget.model().mainSeries().bars();
+          barsCount = bars && typeof bars.size === 'function' ? bars.size() : 0;
+        } catch(e) {}
+        return {
+          started: unwrap(r.isReplayStarted()),
+          toolbar_visible: typeof r.isReplayToolbarVisible === 'function' ? unwrap(r.isReplayToolbarVisible()) : null,
+          bars_count: barsCount
+        };
+      })()
+    `);
+    stillStarted = !!state?.started;
+    toolbarVisible = state?.toolbar_visible !== false;
+    barsCount = Number(state?.bars_count || 0);
+    if (!stillStarted && barsCount > 0) break;
+  }
+
+  let reloaded = false;
+  let chartReady = null;
+  if (stillStarted || barsCount === 0) {
+    // TradingView Desktop 3.1 can leave isReplayStarted=true after stopReplay().
+    // In that ghost state the toolbar may be hidden but the main series has 0
+    // bars, so quote/OHLCV/drawing tools fail. A page reload resets the chart
+    // without touching the user's persisted replay-toolbar preference.
+    reloaded = true;
+    await evaluate('window.location.reload()');
+    await sleep(1500);
+    chartReady = await waitForChart({ timeout: 20000 });
+    const state = await evaluate(`
+      (function() {
+        var out = { replay_api_available: !!(window.TradingViewApi && window.TradingViewApi._replayApi) };
+        try {
+          var r = window.TradingViewApi._replayApi;
+          function unwrap(v) { return (v && typeof v === 'object' && typeof v.value === 'function') ? v.value() : v; }
+          out.started = r ? !!unwrap(r.isReplayStarted()) : false;
+          out.toolbar_visible = r && typeof r.isReplayToolbarVisible === 'function' ? unwrap(r.isReplayToolbarVisible()) : null;
+        } catch(e) {
+          out.replay_error = e.message;
+          out.started = false;
+        }
+        try {
+          var chart = window.TradingViewApi._activeChartWidgetWV.value();
+          var bars = chart._chartWidget.model().mainSeries().bars();
+          out.bars_count = bars && typeof bars.size === 'function' ? bars.size() : 0;
+        } catch(e2) {
+          out.chart_error = e2.message;
+          out.bars_count = 0;
+        }
+        return out;
+      })()
+    `);
+    stillStarted = !!state?.started;
+    toolbarVisible = state?.toolbar_visible !== false;
+    barsCount = Number(state?.bars_count || 0);
+  }
+
+  return {
+    success: !stillStarted && barsCount > 0,
+    action: reloaded ? 'replay_reset_by_reload' : 'replay_stopped',
+    replay_started_state: stillStarted,
+    toolbar_visible: toolbarVisible,
+    bars_count: barsCount,
+    reloaded,
+    chart_ready: chartReady ? chartReady.ok : undefined,
+    elapsed_ms: chartReady ? chartReady.elapsed_ms : undefined,
+    warning: reloaded
+      ? 'TradingView kept replay in a ghost state after stopReplay, so the chart was reloaded to restore live bars.'
+      : undefined,
+  };
 }
 
 export async function trade({ action }) {

@@ -43,14 +43,29 @@ export async function openPanel({ panel, action }) {
         var isOpen = !!(bottomArea && bottomArea.offsetHeight > 50);
         if (panel === 'pine-editor') { var monacoEl = document.querySelector('.monaco-editor.pine-editor-monaco'); isOpen = isOpen && !!monacoEl; }
         if (panel === 'strategy-tester') { var stratPanel = document.querySelector('[data-name="backtesting"]') || document.querySelector('[class*="strategyReport"]'); isOpen = isOpen && !!(stratPanel && stratPanel.offsetParent); }
+        function readValue(v) {
+          try { return (v && typeof v === 'object' && typeof v.value === 'function') ? v.value() : v; } catch(e) { return v; }
+        }
+        function closeWidget() {
+          if (typeof bwb.hideWidget === 'function') { bwb.hideWidget(widgetName); return 'hideWidget'; }
+          if (typeof bwb._hideWidget === 'function') { bwb._hideWidget(widgetName); return '_hideWidget'; }
+          if (typeof bwb.close === 'function') { bwb.close(); return 'close'; }
+          if (typeof bwb.hide === 'function') { bwb.hide(); return 'hide'; }
+          if (typeof bwb.toggleWidget === 'function') {
+            var active = readValue(typeof bwb.activeWidgetName === 'function' ? bwb.activeWidgetName() : bwb.activeWidgetName);
+            if (!active || active === widgetName || isOpen) { bwb.toggleWidget(widgetName); return 'toggleWidget'; }
+          }
+          return null;
+        }
         var performed = 'none';
         if (action === 'open' || (action === 'toggle' && !isOpen)) {
           if (panel === 'pine-editor') { if (typeof bwb.activateScriptEditorTab === 'function') bwb.activateScriptEditorTab(); else if (typeof bwb.showWidget === 'function') bwb.showWidget(widgetName); }
           else { if (typeof bwb.showWidget === 'function') bwb.showWidget(widgetName); }
           performed = 'opened';
         } else if (action === 'close' || (action === 'toggle' && isOpen)) {
-          if (typeof bwb.hideWidget === 'function') bwb.hideWidget(widgetName);
-          performed = 'closed';
+          var closeMethod = closeWidget();
+          if (!closeMethod) return { error: 'No supported close method on bottomWidgetBar' };
+          performed = 'closed:' + closeMethod;
         }
         return { was_open: isOpen, performed: performed };
       })()

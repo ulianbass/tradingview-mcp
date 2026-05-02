@@ -316,6 +316,11 @@ Lee la salida de `line.new()`, `label.new()`, `table.new()`, `box.new()` de cual
 | `replay_status` | Ver posicion, P&L, fecha |
 | `replay_stop` | Volver a tiempo real |
 
+Los limites del plan de TradingView siguen aplicando. Essential soporta
+Bar Replay, pero el historial intradia de replay es menor que en planes mas
+altos; usa fechas recientes o `replay_start` sin fecha para seleccionar la
+primera barra disponible.
+
 ### Multi-panel, alertas, dibujos, UI
 
 | Tool | Que hace |

@@ -354,6 +354,10 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | `replay_status` | Check position, P&L, date |
 | `replay_stop` | Return to realtime |
 
+TradingView plan limits still apply. Essential supports Bar Replay, but
+intraday replay history is shorter than higher tiers; use recent dates or
+`replay_start` without a date to select the first available replay bar.
+
 ### Multi-Pane, Alerts, Drawings, UI
 
 | Tool | What it does |

@@ -165,8 +165,52 @@ export async function removeOne({ entity_id }) {
 
 export async function clearAll() {
   const apiPath = await getChartApi();
-  await evaluate(`${apiPath}.removeAllShapes()`);
-  return { success: true, action: 'all_shapes_removed' };
+  const result = await evaluate(`
+    (function() {
+      var api = ${apiPath};
+      var before = api.getAllShapes ? (api.getAllShapes() || []) : [];
+      var errors = [];
+
+      try {
+        if (typeof api.removeAllShapes === 'function') api.removeAllShapes();
+      } catch (e) {
+        errors.push('removeAllShapes: ' + e.message);
+      }
+
+      var after = api.getAllShapes ? (api.getAllShapes() || []) : [];
+      for (var pass = 0; pass < 3 && after.length > 0; pass++) {
+        var ids = after.map(function(s) { return s.id; }).filter(Boolean);
+        for (var i = 0; i < ids.length; i++) {
+          try {
+            api.removeEntity(ids[i]);
+          } catch (e1) {
+            try {
+              if (typeof api.removeEntityWithUndo === 'function') api.removeEntityWithUndo(ids[i]);
+              else throw e1;
+            } catch (e2) {
+              errors.push(ids[i] + ': ' + e2.message);
+            }
+          }
+        }
+        after = api.getAllShapes ? (api.getAllShapes() || []) : [];
+      }
+
+      return {
+        before_count: before.length,
+        remaining_count: after.length,
+        remaining_shapes: after.map(function(s) { return { id: s.id, name: s.name }; }),
+        errors: errors
+      };
+    })()
+  `);
+  return {
+    success: result?.remaining_count === 0,
+    action: 'all_shapes_removed',
+    before_count: result?.before_count ?? null,
+    remaining_count: result?.remaining_count ?? null,
+    remaining_shapes: result?.remaining_shapes || [],
+    errors: result?.errors || [],
+  };
 }
 
 /**

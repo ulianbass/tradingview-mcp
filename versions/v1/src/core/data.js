@@ -4,6 +4,7 @@
 import { evaluate, evaluateAsync, KNOWN_PATHS } from '../connection.js';
 import { escapeJsString } from '../sanitize.js';
 import { ErrorCodes } from '../errors.js';
+import { waitForChart } from '../await.js';
 
 const MAX_OHLCV_BARS = 500;
 const MAX_TRADES = 20;
@@ -66,8 +67,7 @@ export async function getOhlcv({ count, summary } = {}) {
   const limit = Math.min(count || 100, MAX_OHLCV_BARS);
   let data;
   let fetchError = null;
-  try {
-    data = await evaluate(`
+  const readBars = () => evaluate(`
       (function() {
         var bars = ${BARS_PATH};
         if (!bars || typeof bars.lastIndex !== 'function') return null;
@@ -81,9 +81,24 @@ export async function getOhlcv({ count, summary } = {}) {
         return {bars: result, total_bars: bars.size(), source: 'direct_bars'};
       })()
     `);
+
+  try {
+    data = await readBars();
   } catch (e) {
     fetchError = e.message || String(e);
     data = null;
+  }
+
+  if (!data || !data.bars || data.bars.length === 0) {
+    const ready = await waitForChart({ timeout: 10000 });
+    if (ready.ok) {
+      try {
+        data = await readBars();
+      } catch (e) {
+        fetchError = e.message || String(e);
+        data = null;
+      }
+    }
   }
 
   if (!data || !data.bars || data.bars.length === 0) {
@@ -258,7 +273,7 @@ export async function getEquity() {
 }
 
 export async function getQuote({ symbol } = {}) {
-  const data = await evaluate(`
+  const readQuote = () => evaluate(`
     (function() {
       var api = ${CHART_API};
       var sym = '${escapeJsString(symbol || '')}';
@@ -283,7 +298,14 @@ export async function getQuote({ symbol } = {}) {
       } catch(e) { errors.push({field:'bid_ask', message: e.message}); }
       try {
         var hdr = document.querySelector('[class*="headerRow"] [class*="last-"]');
-        if (hdr) { var hdrPrice = parseFloat(hdr.textContent.replace(/[^0-9.\\-]/g, '')); if (!isNaN(hdrPrice)) quote.header_price = hdrPrice; }
+        if (hdr) {
+          var hdrPrice = parseFloat(hdr.textContent.replace(/[^0-9.\\-]/g, ''));
+          if (!isNaN(hdrPrice)) {
+            quote.header_price = hdrPrice;
+            if (!quote.last) quote.last = hdrPrice;
+            if (!quote.close) quote.close = hdrPrice;
+          }
+        }
       } catch(e) { errors.push({field:'header_price', message: e.message}); }
       if (ext.description) quote.description = ext.description;
       if (ext.exchange) quote.exchange = ext.exchange;
@@ -292,6 +314,13 @@ export async function getQuote({ symbol } = {}) {
       return quote;
     })()
   `);
+
+  let data = await readQuote();
+  if (!data || (!data.last && !data.close)) {
+    const ready = await waitForChart({ timeout: 10000 });
+    if (ready.ok) data = await readQuote();
+  }
+
   if (!data || (!data.last && !data.close)) {
     const err = new Error('Could not retrieve quote. The chart may still be loading.');
     err.code = ErrorCodes.CHART_NOT_READY;

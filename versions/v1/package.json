@@ -1,6 +1,6 @@
 {
   "name": "tradingview-mcp",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "MCP bridge for TradingView Desktop via Chrome DevTools Protocol",
   "type": "module",
   "main": "src/server.js",
@@ -15,14 +15,14 @@
     "start": "node src/server.js",
     "tv": "node src/cli/index.js",
     "test": "npm run test:unit",
-    "test:unit": "node --test tests/pine_analyze.test.js tests/cli.test.js tests/launch.test.js",
+    "test:unit": "node --test tests/pine_analyze.test.js tests/cli.test.js tests/launch.test.js tests/sanitization.test.js",
     "test:remote": "node --test tests/pine_remote.test.js tests/cli_remote.test.js",
     "test:e2e": "node --test tests/e2e.test.js tests/selectors.test.js",
     "test:selectors": "node --test tests/selectors.test.js",
     "test:cli": "node --test tests/cli.test.js",
     "test:all": "npm run test:unit && npm run test:remote && npm run test:e2e",
-    "test:verbose": "node --test --test-reporter=spec tests/pine_analyze.test.js tests/cli.test.js tests/launch.test.js",
-    "test:count": "node --test --test-reporter=spec tests/pine_analyze.test.js tests/cli.test.js tests/launch.test.js 2>&1 | tail -5"
+    "test:verbose": "node --test --test-reporter=spec tests/pine_analyze.test.js tests/cli.test.js tests/launch.test.js tests/sanitization.test.js",
+    "test:count": "node --test --test-reporter=spec tests/pine_analyze.test.js tests/cli.test.js tests/launch.test.js tests/sanitization.test.js 2>&1 | tail -5"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",

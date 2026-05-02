@@ -1,6 +1,6 @@
 # TradingView MCP
 
-[Español](README.es.md) · [Release v1.0.1](https://github.com/ulianbass/tradingview-mcp/releases/tag/v1.0.1) · [Repository history](docs/BRANCHES.md)
+[Español](README.es.md) · [Release v1.0.2](https://github.com/ulianbass/tradingview-mcp/releases/tag/v1.0.2) · [Repository history](docs/BRANCHES.md)
 
 > Local TradingView Desktop MCP bridge for chart automation, Pine workflows, Codex support, and consent-gated trading actions.
 

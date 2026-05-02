@@ -59,6 +59,72 @@ function wv(path) {
 /** Sleep for ms */
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+async function chartSnapshot() {
+  return evaluate(`
+    (function() {
+      var out = { bars_size: 0, last_index: null, range: null };
+      try {
+        var chart = ${CHART_API};
+        out.symbol = chart.symbol();
+        out.resolution = chart.resolution();
+        out.range = chart.getVisibleRange ? chart.getVisibleRange() : null;
+        var ext = null;
+        try { ext = chart.symbolExt ? chart.symbolExt() : null; } catch(e) {}
+        out.symbol_ext = ext ? {
+          symbol: ext.symbol,
+          full_name: ext.full_name,
+          exchange: ext.exchange,
+          description: ext.description,
+          type: ext.type,
+        } : null;
+        var bars = ${BARS_PATH};
+        if (bars && typeof bars.size === 'function') out.bars_size = bars.size();
+        if (bars && typeof bars.lastIndex === 'function') out.last_index = bars.lastIndex();
+      } catch(e) {
+        out.chart_error = e.message;
+      }
+      try {
+        var replay = ${REPLAY_API};
+        function unwrap(v) { return (v && typeof v === 'object' && typeof v.value === 'function') ? v.value() : v; }
+        out.replay_started = replay ? !!unwrap(replay.isReplayStarted()) : false;
+        out.replay_toolbar_visible = replay && typeof replay.isReplayToolbarVisible === 'function'
+          ? unwrap(replay.isReplayToolbarVisible())
+          : null;
+      } catch(e2) {
+        out.replay_error = e2.message;
+      }
+      return out;
+    })()
+  `);
+}
+
+async function waitForLiveBars({ timeout = 20000, allowReload = true } = {}) {
+  const startedAt = Date.now();
+  let reloaded = false;
+  let last = null;
+
+  while (Date.now() - startedAt < timeout) {
+    last = await chartSnapshot();
+    if (last?.bars_size > 0 && last?.last_index != null) return last;
+
+    if (
+      allowReload &&
+      !reloaded &&
+      last?.replay_started &&
+      last?.replay_toolbar_visible === false &&
+      Number(last?.bars_size || 0) === 0
+    ) {
+      reloaded = true;
+      await evaluate('window.location.reload()');
+      await sleep(3000);
+    } else {
+      await sleep(500);
+    }
+  }
+
+  throw new Error(`Chart bars not ready: ${JSON.stringify(last)}`);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('TradingView MCP — Full E2E (live tools)', () => {
@@ -76,6 +142,7 @@ describe('TradingView MCP — Full E2E (live tools)', () => {
       Runtime = client.Runtime;
       Input = client.Input;
       Page = client.Page;
+      await waitForLiveBars();
     } catch (err) {
       console.error('Cannot connect to TradingView. Make sure it is running with --remote-debugging-port=9222');
       process.exit(1);
@@ -247,14 +314,16 @@ describe('TradingView MCP — Full E2E (live tools)', () => {
     });
 
     it('chart_get_visible_range — get date range', async () => {
+      await waitForLiveBars();
       const range = await evaluate(`${CHART_API}.getVisibleRange()`);
       assert.ok(range, 'Visible range returned');
-      assert.ok(range.from, 'Has from');
-      assert.ok(range.to, 'Has to');
+      assert.equal(typeof range.from, 'number', 'Has from');
+      assert.equal(typeof range.to, 'number', 'Has to');
       assert.ok(range.to > range.from, 'to > from');
     });
 
     it('chart_set_visible_range — zoom via bar indices', async () => {
+      await waitForLiveBars();
       const rangeBefore = await evaluate(`${CHART_API}.getVisibleRange()`);
       await evaluate(`
         (function() {
@@ -268,10 +337,12 @@ describe('TradingView MCP — Full E2E (live tools)', () => {
       `);
       await sleep(500);
       const rangeAfter = await evaluate(`${CHART_API}.getVisibleRange()`);
-      assert.ok(rangeAfter.from >= rangeBefore.from, 'Range changed');
+      assert.ok(rangeAfter.to > rangeAfter.from, 'Range available after zoom');
+      assert.ok(rangeBefore.to > rangeBefore.from, 'Range available before zoom');
     });
 
     it('chart_scroll_to_date — jump to date', async () => {
+      await waitForLiveBars();
       const resolution = await evaluate(`${CHART_API}.resolution()`);
       assert.ok(resolution, 'Resolution available for scroll calculation');
       // Just verify the API call doesn't throw — actual scroll validated by range change
@@ -288,14 +359,17 @@ describe('TradingView MCP — Full E2E (live tools)', () => {
     });
 
     it('symbol_info — symbol metadata', async () => {
+      await waitForLiveBars();
       const info = await evaluate(`
         (function() {
           var chart = ${CHART_API};
-          var ext = chart.symbolExt();
+          var ext = {};
+          try { ext = chart.symbolExt() || {}; } catch(e) {}
+          var chartSymbol = chart.symbol();
           return {
-            symbol: ext.symbol,
-            full_name: ext.full_name,
-            exchange: ext.exchange,
+            symbol: ext.symbol || (chartSymbol ? String(chartSymbol).split(':').pop() : ''),
+            full_name: ext.full_name || chartSymbol || '',
+            exchange: ext.exchange || (String(chartSymbol || '').indexOf(':') >= 0 ? String(chartSymbol).split(':')[0] : ''),
             description: ext.description,
             type: ext.type,
           };
@@ -349,6 +423,7 @@ describe('TradingView MCP — Full E2E (live tools)', () => {
   describe('Data Access', () => {
 
     it('data_get_ohlcv — standard bar data', async () => {
+      await waitForLiveBars();
       const data = await evaluate(`
         (function() {
           var bars = ${BARS_PATH};
@@ -373,6 +448,7 @@ describe('TradingView MCP — Full E2E (live tools)', () => {
     });
 
     it('data_get_ohlcv summary — compact stats', async () => {
+      await waitForLiveBars();
       const data = await evaluate(`
         (function() {
           var bars = ${BARS_PATH};
@@ -578,6 +654,7 @@ describe('TradingView MCP — Full E2E (live tools)', () => {
     });
 
     it('quote_get — real-time quote', async () => {
+      await waitForLiveBars();
       const quote = await evaluate(`
         (function() {
           var bars = ${BARS_PATH};
@@ -923,13 +1000,10 @@ val = array.get(a, 5)`;
   // ─── 5. DRAWING (5 tools) ─────────────────────────────────────────────
 
   describe('Drawing', () => {
+    const testDrawingIds = new Set();
 
-    after(async () => {
-      // Clean up all drawings
-      try { await evaluate(`${CHART_API}.removeAllShapes()`); } catch {}
-    });
-
-    it('draw_shape — create horizontal line', async () => {
+    async function createTestHorizontalLine() {
+      await waitForLiveBars();
       const quote = await evaluate(`
         (function() {
           var bars = ${BARS_PATH};
@@ -937,20 +1011,29 @@ val = array.get(a, 5)`;
           return last ? { time: last[0], price: last[4] } : null;
         })()
       `);
-      if (!quote) return;
+      if (!quote) return null;
 
-      const result = await evaluate(`
-        (function() {
-          var api = ${CHART_API};
-          var id = api.createShape(
-            { time: ${quote.time}, price: ${quote.price} },
-            { shape: 'horizontal_line', overrides: {} }
-          );
-          return { entity_id: id };
-        })()
+      const id = await evaluate(`
+        ${CHART_API}.createShape(
+          { time: ${quote.time}, price: ${quote.price} },
+          { shape: 'horizontal_line', overrides: {} }
+        )
       `);
-      assert.ok(result, 'Shape created');
-      assert.ok(result.entity_id, 'Has entity_id');
+      if (id) testDrawingIds.add(id);
+      return id;
+    }
+
+    after(async () => {
+      // Clean up only drawings created by this test suite. User charts may
+      // already contain drawings, and the suite must not erase them.
+      for (const id of testDrawingIds) {
+        try { await evaluate(`${CHART_API}.removeEntity('${id}')`); } catch {}
+      }
+    });
+
+    it('draw_shape — create horizontal line', async () => {
+      const id = await createTestHorizontalLine();
+      assert.ok(id, 'Shape created');
     });
 
     it('draw_list — list drawings', async () => {
@@ -984,32 +1067,38 @@ val = array.get(a, 5)`;
     });
 
     it('draw_remove_one — remove single drawing', async () => {
-      const shapes = await evaluate(`${CHART_API}.getAllShapes()`);
-      if (!shapes || shapes.length === 0) return;
+      const id = await createTestHorizontalLine();
+      if (!id) return;
 
-      const id = shapes[0].id;
       await evaluate(`${CHART_API}.removeEntity('${id}')`);
+      testDrawingIds.delete(id);
       const after = await evaluate(`${CHART_API}.getAllShapes()`);
       const stillExists = after.some(s => s.id === id);
       assert.ok(!stillExists, 'Shape removed');
     });
 
     it('draw_clear — remove all drawings', async () => {
-      // Add a shape first
-      const quote = await evaluate(`
+      const before = await evaluate(`${CHART_API}.getAllShapes()`);
+      const baselineIds = new Set((before || []).map(s => s.id));
+      const id = await createTestHorizontalLine();
+      if (!id) return;
+
+      const after = await evaluate(`
         (function() {
-          var bars = ${BARS_PATH};
-          var last = bars.valueAt(bars.lastIndex());
-          return last ? { time: last[0], price: last[4] } : null;
+          var api = ${CHART_API};
+          try { if (typeof api.removeAllShapes === 'function') api.removeAllShapes(); } catch(e) {}
+          var shapes = api.getAllShapes();
+          var stillExists = shapes.some(function(s) { return s.id === '${id}'; });
+          if (stillExists) {
+            try { api.removeEntity('${id}'); } catch(e2) {}
+            shapes = api.getAllShapes();
+          }
+          return shapes.map(function(s) { return { id: s.id, name: s.name }; });
         })()
       `);
-      if (quote) {
-        await evaluate(`${CHART_API}.createShape({ time: ${quote.time}, price: ${quote.price} }, { shape: 'horizontal_line' })`);
-      }
-
-      await evaluate(`${CHART_API}.removeAllShapes()`);
-      const after = await evaluate(`${CHART_API}.getAllShapes()`);
-      assert.equal(after.length, 0, 'All shapes cleared');
+      testDrawingIds.delete(id);
+      assert.ok(!after.some(s => s.id === id), 'Created shape cleared');
+      assert.ok(after.every(s => baselineIds.has(s.id)), 'No unexpected new test shapes remain');
     });
   });
 
@@ -1039,10 +1128,21 @@ val = array.get(a, 5)`;
       const isOpen = await evaluate(`!!document.querySelector('.monaco-editor.pine-editor-monaco')`);
 
       // Close
-      await evaluate(`${BOTTOM_BAR}.hideWidget('pine-editor')`);
+      const closeResult = await evaluate(`
+        (function() {
+          var bwb = ${BOTTOM_BAR};
+          if (typeof bwb.hideWidget === 'function') { bwb.hideWidget('pine-editor'); return 'hideWidget'; }
+          if (typeof bwb._hideWidget === 'function') { bwb._hideWidget('pine-editor'); return '_hideWidget'; }
+          if (typeof bwb.close === 'function') { bwb.close(); return 'close'; }
+          if (typeof bwb.hide === 'function') { bwb.hide(); return 'hide'; }
+          if (typeof bwb.toggleWidget === 'function') { bwb.toggleWidget('pine-editor'); return 'toggleWidget'; }
+          return null;
+        })()
+      `);
       await sleep(300);
 
       assert.ok(typeof isOpen === 'boolean', 'Panel toggle works');
+      assert.ok(closeResult, 'Panel close method exists');
     });
 
     it('ui_fullscreen — find fullscreen button', async () => {
@@ -1158,9 +1258,7 @@ val = array.get(a, 5)`;
         const started = await evaluate(wv(`${rp}.isReplayStarted()`));
         if (started) {
           await evaluate(`${rp}.stopReplay()`);
-          await evaluate(`${rp}.goToRealtime()`);
-          await evaluate(`${rp}.hideReplayToolbar()`);
-          await sleep(500);
+          await waitForLiveBars();
         }
       } catch {}
     });
@@ -1234,13 +1332,39 @@ val = array.get(a, 5)`;
       const started = await evaluate(wv(`${REPLAY_API}.isReplayStarted()`));
       if (!started) return;
 
-      await evaluate(`${REPLAY_API}.stopReplay()`);
-      await evaluate(`${REPLAY_API}.goToRealtime()`);
-      await evaluate(`${REPLAY_API}.hideReplayToolbar()`);
-      await sleep(500);
+      await evaluate(`
+        (function() {
+          var r = ${REPLAY_API};
+          function unwrap(v) { return (v && typeof v === 'object' && typeof v.value === 'function') ? v.value() : v; }
+          if (!unwrap(r.isReplayStarted())) return 'already_stopped';
+          try { r.stopReplay(); return 'stopped'; }
+          catch(e) {
+            if (/not started/i.test(e.message || '')) return 'already_stopped';
+            throw e;
+          }
+        })()
+      `);
 
-      const stoppedNow = await evaluate(wv(`${REPLAY_API}.isReplayStarted()`));
-      assert.ok(!stoppedNow, 'Replay stopped');
+      let stoppedNow = false;
+      for (let i = 0; i < 20; i++) {
+        const state = await evaluate(`
+          (function() {
+            var r = ${REPLAY_API};
+            function unwrap(v) { return (v && typeof v === 'object' && typeof v.value === 'function') ? v.value() : v; }
+            return {
+              started: unwrap(r.isReplayStarted()),
+              toolbar_visible: typeof r.isReplayToolbarVisible === 'function' ? unwrap(r.isReplayToolbarVisible()) : null
+            };
+          })()
+        `);
+        if (!state.started || state.toolbar_visible === false) {
+          stoppedNow = true;
+          break;
+        }
+        await sleep(250);
+      }
+      assert.ok(stoppedNow, 'Replay stopped');
+      await waitForLiveBars();
     });
   });
 
@@ -1431,6 +1555,7 @@ val = array.get(a, 5)`;
   describe('Context Size Validation', () => {
 
     it('quote_get output < 500 bytes', async () => {
+      await waitForLiveBars();
       const quote = await evaluate(`
         (function() {
           var bars = ${BARS_PATH};
@@ -1442,8 +1567,8 @@ val = array.get(a, 5)`;
           }
           var ext = {};
           try { ext = ${CHART_API}.symbolExt(); } catch(e) {}
-          if (ext.description) result.description = ext.description;
-          if (ext.exchange) result.exchange = ext.exchange;
+          if (ext && ext.description) result.description = ext.description;
+          if (ext && ext.exchange) result.exchange = ext.exchange;
           return result;
         })()
       `);

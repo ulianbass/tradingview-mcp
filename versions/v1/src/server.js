@@ -23,7 +23,7 @@ import { registerTradingExecTools } from "./tools/tradingExec.js";
 const server = new McpServer(
   {
     name: "tradingview",
-    version: "1.0.0",
+    version: "1.0.1",
     description:
       "AI-assisted TradingView chart analysis and Pine Script development via Chrome DevTools Protocol",
   },

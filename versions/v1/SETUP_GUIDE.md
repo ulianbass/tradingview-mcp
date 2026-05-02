@@ -5,19 +5,19 @@ This file is a step-by-step guide for Claude Code (or any LLM agent) to install 
 ## Step 1: Clone and Install
 
 ```bash
-git clone https://github.com/LewisWJackson/tradingview-mcp-jackson.git ~/tradingview-mcp-jackson
-cd ~/tradingview-mcp-jackson
+git clone https://github.com/ulianbass/tradingview-mcp.git ~/tradingview-mcp
+cd ~/tradingview-mcp/versions/v1
 npm install
 ```
 
-If the user specifies a different install path, use that instead of `~/tradingview-mcp-jackson`.
+If the user specifies a different install path, use that instead of `~/tradingview-mcp`.
 
 ## Step 2: Set Up Rules
 
 Copy the example rules file and open it for the user to fill in:
 
 ```bash
-cp ~/tradingview-mcp-jackson/rules.example.json ~/tradingview-mcp-jackson/rules.json
+cp ~/tradingview-mcp/versions/v1/rules.example.json ~/tradingview-mcp/versions/v1/rules.json
 ```
 
 Tell the user: "Open `rules.json` and fill in your watchlist (the symbols you trade), your bias criteria (what makes something bullish/bearish for you), and your risk rules. This is what the morning brief uses every day."
@@ -31,7 +31,7 @@ Add the server to the user's Claude Code MCP configuration. The config file is a
   "mcpServers": {
     "tradingview": {
       "command": "node",
-      "args": ["/Users/YOUR_USERNAME/tradingview-mcp-jackson/src/server.js"]
+      "args": ["/Users/YOUR_USERNAME/tradingview-mcp/versions/v1/src/server.js"]
     }
   }
 }
@@ -104,7 +104,7 @@ To retrieve tomorrow: *"Get yesterday's session using session_get"*
 To use the `tv` CLI command globally:
 
 ```bash
-cd ~/tradingview-mcp-jackson
+cd ~/tradingview-mcp/versions/v1
 npm link
 ```
 
@@ -117,7 +117,7 @@ Then `tv status`, `tv quote`, `tv pine compile`, etc. work from anywhere.
 | `cdp_connected: false` | Launch TradingView with `--remote-debugging-port=9222` |
 | `ECONNREFUSED` | TradingView isn't running or port 9222 is blocked |
 | MCP server not showing in Claude Code | Check `~/.claude/.mcp.json` syntax, restart Claude Code |
-| `tv` command not found | Run `npm link` from the project directory |
+| `tv` command not found | Run `npm link` from `versions/v1` |
 | Tools return stale data | TradingView may still be loading — wait a few seconds |
 | Pine Editor tools fail | Open the Pine Editor panel first (`ui_open_panel pine-editor open`) |
 

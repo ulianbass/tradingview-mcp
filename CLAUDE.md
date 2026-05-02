@@ -1,6 +1,6 @@
 # TradingView MCP — Claude Instructions
 
-68 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+100+ tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
 
 ## Decision Tree — Which Tool When
 
@@ -98,7 +98,15 @@ Do NOT fall back to the slow multi-call path (chart_get_state + quote_get + data
 Prefer `trade_snapshot` over these when you also need quote/bars — it's one round-trip instead of three.
 - `trading_get_positions` → reads the Account Manager positions table. **Auto-opens the bottom panel if it's collapsed** (single-round-trip with polling). Returns `panel_open`, `position_count`, `positions[]`, `columns[]`, `empty_state_text`, and a `warning: 'panel_closed'` field if it could not read. Check `empty_state_text` to distinguish "no positions" (readable, empty) from "could not read".
 - `trading_get_orders` → same contract for pending orders.
-- These are READ-ONLY. Execution of any trade must be done by the user directly.
+- These two tools are READ-ONLY.
+
+### "Submit / cancel / close an order"
+Execution tools exist, but they are consent-gated and broker-sensitive:
+
+1. Call `trading_detect_mode` first.
+2. If mode is `broker`, require explicit per-trade user authorization and make the live-risk wording clear.
+3. Only call `trading_submit_order`, `trading_cancel_order`, or `trading_close_position` when the user has explicitly authorized that specific action and the tool payload includes `consent: true`.
+4. Never infer consent from earlier messages, paper-trading habits, or a general preference.
 
 ### "Draw other shapes on the chart" (NOT for trade setups)
 - `draw_shape` → horizontal_line, trend_line, rectangle, text (pass point + optional point2). Use for marking levels/zones that are NOT part of a trade proposal.

@@ -3,7 +3,7 @@
  *
  * IMPORTANT: This module is READ-ONLY. It intentionally does NOT expose
  * any tools to submit, modify, or cancel orders, or to move money.
- * Claude policy is that trade execution must be done by the user directly.
+ * Order execution lives in tradingExec.js and is consent-gated.
  *
  * This lets Claude see what positions/orders exist so it can reason
  * about the user's current state without acting on their behalf.
@@ -205,9 +205,10 @@ async function scrapeTable(tableSelectors, kind) {
   }
 
   result.note =
-    'Read-only. Execution of any trade must be done by the user directly. ' +
+    'Read-only. This tool never submits, modifies, or cancels orders. ' +
     'Before drawing or proposing a trade, always call this tool first and ' +
-    'check `panel_open`, `position_count`, and `empty_state_text`.';
+    'check `panel_open`, `position_count`, and `empty_state_text`. Use ' +
+    'consent-gated execution tools only after explicit per-trade authorization.';
 
   if (data?.errors?.length) result.partial_errors = data.errors;
   return result;

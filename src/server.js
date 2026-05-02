@@ -28,7 +28,7 @@ const server = new McpServer(
       "AI-assisted TradingView chart analysis and Pine Script development via Chrome DevTools Protocol",
   },
   {
-    instructions: `TradingView MCP — 80+ tools for reading and controlling a live TradingView Desktop chart.
+    instructions: `TradingView MCP — 100+ tools for reading and controlling a live TradingView Desktop chart.
 
 ═══════════════════════════════════════════════════════════════════════
 MANDATORY RULES — these apply to ALL clients (Claude Code, Codex,
@@ -80,13 +80,12 @@ The native Risk/Reward tool shows entry, TP box, SL box, qty, R:R
 ratio, and $ amounts automatically. draw_shape is only for marking
 levels or zones that are NOT part of a trade proposal.
 
-RULE 5 — READ-ONLY ON TRADE EXECUTION.
+RULE 5 — TRADE EXECUTION IS CONSENT-GATED.
 trading_get_positions, trading_get_orders, and trade_snapshot are
-read-only. Execution of any trade (market, limit, stop, close, modify,
-cancel) must be done by the user directly. If the user explicitly
-authorizes an order, use trading_submit_order with consent: true and
-verify trading_detect_mode first — never on a live broker without
-explicit per-trade authorization.
+read-only. Execution tools exist, but every submit/cancel/close action
+requires explicit per-trade authorization plus consent: true in the
+tool payload. Always verify trading_detect_mode first. Never submit to
+a live broker from general intent, stale consent, or inferred consent.
 
 ═══════════════════════════════════════════════════════════════════════
 TOOL SELECTION GUIDE (non-scalping / deep research paths):

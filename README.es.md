@@ -1,6 +1,6 @@
 # TradingView MCP
 
-Servidor MCP para TradingView Desktop — 78 herramientas para leer, controlar y automatizar charts via Chrome DevTools Protocol. Funciona con **Claude Code**, **Codex** y **Claude Desktop**.
+Servidor MCP para TradingView Desktop — 100+ herramientas para leer, controlar y automatizar charts via Chrome DevTools Protocol. Funciona con **Claude Code**, **Codex** y **Claude Desktop**.
 
 Construido sobre [tradingview-mcp](https://github.com/tradesdontlie/tradingview-mcp) de [@tradesdontlie](https://github.com/tradesdontlie) y el [fork de Jackson](https://github.com/LewisWJackson/tradingview-mcp-jackson) de [@LewisWJackson](https://github.com/LewisWJackson). Este fork agrega seguridad, sanitizacion de inputs, correccion de bugs, compatibilidad con Codex y mejoras de calidad de codigo.
 
@@ -11,7 +11,7 @@ Construido sobre [tradingview-mcp](https://github.com/tradesdontlie/tradingview-
 > **Requiere suscripcion valida de TradingView.** Esta herramienta no evita ningun paywall. Lee y controla la app TradingView Desktop que ya esta corriendo en tu maquina.
 
 > [!NOTE]
-> **Todo el procesamiento es local.** Nada se envia a ningun lado. Ningun dato de TradingView sale de tu maquina.
+> **El control del chart y las lecturas de mercado corren localmente** via TradingView Desktop por CDP. Los helpers de Pine pueden llamar endpoints de Pine de TradingView cuando usas funciones explicitas de servidor como `pine_check`, `pine_save` o pruebas remotas de Pine.
 
 ---
 
@@ -250,7 +250,7 @@ La IA lee `CLAUDE.md` automaticamente cuando trabaja en este proyecto. Contiene 
 
 ---
 
-## Referencia de tools (81 MCP tools)
+## Referencia de tools (100+ MCP tools)
 
 ### Morning Brief (nuevo en este fork)
 
@@ -352,6 +352,19 @@ Lista completa: `tv --help`
 
 ---
 
+## Pruebas
+
+```bash
+npm test            # suite offline determinista, sin TradingView/CDP
+npm run test:remote # usa el compilador Pine remoto de TradingView
+npm run test:e2e    # requiere TradingView Desktop con --remote-debugging-port=9222
+npm run test:all    # unit + remote + E2E live
+```
+
+Usa `npm test` para desarrollo normal y CI. Corre `test:remote` o `test:e2e` solo cuando quieras validar el compilador Pine externo o una sesion real de TradingView Desktop.
+
+---
+
 ## Solucion de problemas
 
 | Problema | Solucion |
@@ -373,12 +386,12 @@ Lista completa: `tv --help`
 Claude Code / Claude Desktop / Codex  <->  MCP Server (stdio)  <->  CDP (puerto 9222)  <->  TradingView Desktop (Electron)
 ```
 
-- **78 tools originales** + **3 tools de morning brief** = 81 MCP tools en total
+- **100+ MCP tools** para control de chart, Pine, dibujos, replay, alertas, watchlists, streaming, paneles, health y acciones de trading con consentimiento
 - **Transporte**: MCP sobre stdio + CLI (comando `tv`)
 - **Conexion**: Chrome DevTools Protocol en localhost:9222
 - **Compatible con**: Claude Code, Claude Desktop, Codex (cualquier herramienta de IA con soporte MCP)
 - **Seguridad**: Todos los inputs de usuario sanitizados via `escapeJsString()` / `validateNumber()` antes de evaluacion CDP
-- **Sin llamadas externas** — todo corre localmente
+- **Modelo de red**: la automatizacion del chart queda local via CDP; las funciones Pine de servidor llaman explicitamente endpoints Pine de TradingView
 - **Cero dependencias extra** mas alla del original
 
 ---

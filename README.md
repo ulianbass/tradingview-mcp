@@ -1,6 +1,6 @@
 # TradingView MCP
 
-MCP server for TradingView Desktop — 78 tools to read, control, and automate charts via Chrome DevTools Protocol. Works with **Claude Code**, **Codex**, and **Claude Desktop**.
+MCP server for TradingView Desktop — 100+ tools to read, control, and automate charts via Chrome DevTools Protocol. Works with **Claude Code**, **Codex**, and **Claude Desktop**.
 
 **[Leer en espanol](README.es.md)**
 
@@ -13,7 +13,7 @@ Built on top of [tradingview-mcp](https://github.com/tradesdontlie/tradingview-m
 > **Requires a valid TradingView subscription.** This tool does not bypass any TradingView paywall. It reads from and controls the TradingView Desktop app already running on your machine.
 
 > [!NOTE]
-> **All data processing happens locally.** Nothing is sent anywhere. No TradingView data leaves your machine.
+> **Chart control and market-data reads happen locally** through TradingView Desktop over CDP. Pine compile/save helpers may call TradingView's Pine endpoints when you explicitly use Pine server features such as `pine_check`, `pine_save`, or remote Pine tests.
 
 ---
 
@@ -288,7 +288,7 @@ Claude reads `CLAUDE.md` automatically when working in this project. It contains
 
 ---
 
-## Tool Reference (81 MCP tools)
+## Tool Reference (100+ MCP tools)
 
 ### Morning Brief (new in this fork)
 
@@ -390,6 +390,19 @@ Full command list: `tv --help`
 
 ---
 
+## Tests
+
+```bash
+npm test            # deterministic offline suite, no TradingView/CDP needed
+npm run test:remote # hits TradingView Pine compiler over the network
+npm run test:e2e    # requires TradingView Desktop on --remote-debugging-port=9222
+npm run test:all    # unit + remote + live E2E
+```
+
+Use `npm test` for normal development and CI. Run `test:remote` or `test:e2e` only when you intentionally want to validate external Pine compiler behavior or a live TradingView Desktop session.
+
+---
+
 ## Troubleshooting
 
 | Problem | Solution |
@@ -411,12 +424,12 @@ Full command list: `tv --help`
 Claude Code / Claude Desktop / Codex  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
 ```
 
-- **78 original tools** + **3 morning brief tools** = 81 MCP tools total
+- **100+ MCP tools** across chart control, Pine, drawing, replay, alerts, watchlists, streaming, panels, health, and consent-gated trading actions
 - **Transport**: MCP over stdio + CLI (`tv` command)
 - **Connection**: Chrome DevTools Protocol on localhost:9222
 - **Compatible with**: Claude Code, Claude Desktop, Codex (any MCP-capable AI tool)
 - **Security**: All user inputs sanitized via `escapeJsString()` / `validateNumber()` before CDP evaluation
-- **No external network calls** — everything runs locally
+- **Network model**: chart automation stays local via CDP; Pine server features explicitly call TradingView Pine endpoints
 - **Zero extra dependencies** beyond the original
 
 ---
